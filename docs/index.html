@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f172a">
+  <title>SMGo</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app">
+
+  <div id="offline-banner">Offline – using cached data</div>
+
+  <!-- Header -->
+  <div id="header">
+    <h1>SMGo</h1>
+    <span id="progress-text">–</span>
+    <span id="settings-icon" title="Settings">⚙</span>
+  </div>
+  <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+
+  <!-- Loading screen -->
+  <div id="screen-loading">
+    <div class="spinner"></div>
+    <p style="color:var(--muted);font-size:.9rem">Loading today's items…</p>
+    <div id="server-url-wrap"></div>
+  </div>
+
+  <!-- Error screen -->
+  <div id="screen-error" style="display:none">
+    <div style="font-size:2.5rem">⚠️</div>
+    <p style="font-weight:600">Could not load items</p>
+    <p id="error-msg" style="color:var(--muted);font-size:.85rem"></p>
+    <p id="error-hint" style="color:var(--muted);font-size:.8rem"></p>
+    <button id="retry-btn" style="margin-top:8px;padding:10px 24px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:1rem;cursor:pointer">Retry</button>
+  </div>
+
+  <!-- Done screen -->
+  <div id="screen-done" style="display:none">
+    <div class="big-check">✅</div>
+    <p style="font-weight:600;font-size:1.1rem">Session complete!</p>
+    <p id="done-msg" style="color:var(--muted);font-size:.9rem"></p>
+    <p id="done-sub" style="color:var(--muted);font-size:.8rem;margin-top:4px"></p>
+    <button id="done-restart-btn" style="margin-top:16px;padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">Review again from start</button>
+  </div>
+
+  <!-- Review card area (injected by app.js) -->
+  <div id="card-area" style="display:none"></div>
+
+  <!-- Action area -->
+  <div id="action-area" style="display:none">
+    <button id="reveal-btn">Show Answer</button>
+    <div id="grade-row"></div>
+    <div id="sync-status"></div>
+  </div>
+
+</div>
+<script src="./app.js"></script>
+</body>
+</html>

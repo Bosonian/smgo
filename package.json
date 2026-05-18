@@ -1,0 +1,10 @@
+{
+  "name": "smgo",
+  "version": "1.0.0",
+  "description": "SuperMemo mobile companion – serve Facharzt review queue to phone",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}

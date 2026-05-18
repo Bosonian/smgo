@@ -1,0 +1,7 @@
+node_modules/
+grades/
+GradeApplicator/bin/
+GradeApplicator/obj/
+GradeApplicator/publish/
+pwa/
+*.applied.json
