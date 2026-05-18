@@ -1,0 +1,195 @@
+{
+  "date": "2026-05-18",
+  "count": 30,
+  "cards": [
+    {
+      "id": 12,
+      "type": "pdf-extract",
+      "title": "030-071_Neuroborreliose_2024-05.pdf",
+      "body": "030-071_Neuroborreliose_2024-05.pdf\nPage 0\nPDF: 030-071_Neuroborreliose_2024-05.pdf",
+      "pdfPage": 0
+    },
+    {
+      "id": 6,
+      "type": "pdf-extract",
+      "title": "Thieme: Neurologie compact",
+      "body": "Thieme: Neurologie compact\nPage 859\nPDF: -_Neurologie-compact_9783132430365.pdf",
+      "pdfPage": 859
+    },
+    {
+      "id": 30,
+      "type": "topic",
+      "title": "The differential amplifier takes the electrical impulses from the active electro",
+      "body": "The differential amplifier takes the electrical impulses from the active electrode and amplifies\r\n\nthem. It then takes the impulses from the reference electrode, inverts them, and amplifies them.\r\n\nIt then combines these two potentials. In this way, any common noise to both electrodes (extra-\r\n\nneous electrical activity, distant myogenic noise, and EKG artifacts) is eliminated. Differences\r\n\nbetween the two electrodes, however, are amplified. This is the desired signal. Any common\r\n\nfactors such as extraneous noise would be rejected leading to the term common mode rejection.\r\n\nThe common mode rejection ratio is a measure of how well an amplifier eliminates this type of\r\n\ncommon noise."
+    },
+    {
+      "id": 46,
+      "type": "topic",
+      "title": "A demyelinated axon is a myelinated nerve that has lost its myelin covering.This",
+      "body": "A demyelinated axon is a myelinated nerve that has lost its myelin covering.This does not become\r\n\nan unmyelinated nerve. While an unmyelinated axon can conduct an impulse slowly along its\r\n\nentire length, a demyelinated axon may not be able to conduct across a demyelinated area (as the\r\n\nsodium and potassium channels are only located near the nodes of Ranvier). This loss of conduc-\r\n\ntion across a lesion is referred to as conduction block. The term neurapraxia is used to describe\r\n\na lesion where conduction block is present.\r\n\nIt is important to note that while axons have an 'all or none' response, an action potential\r\n\nrepresents the summation of many axons. Thus, a neurapraxic lesion can result in an amplitude\r\n\ndecrement from less than 1% to nearly 100%. In reality, neurapraxic lesions of less than 20% are\r\n\nrarely diagnosed due to the amplitude differences normally seen from different sites of\r\n\nstimulation.\r\n\nAfter a demyelinating lesion, as part of the recovery phase, there is typically regeneration of\r\n\nimmature myelin. This immature myelin will not insulate as well as mature myelin, and therefore\r\n\nduring NCS you may see a return of conduction but at a slower than normal velocity. Therefore,\r\n\nconduction slowing and conduction block are indicative of demyelinating, but not axonal lesions"
+    },
+    {
+      "id": 29,
+      "type": "topic",
+      "title": "NCS",
+      "body": "NCS\r\n\nActive (surface electrode – this is also referred to as the pickup electrode)\r\n\nReference (surface electrode)\r\n\nGround (surface electrode)"
+    },
+    {
+      "id": 28,
+      "type": "topic",
+      "title": "EMG",
+      "body": "EMG\r\n\nActive (needle electrode)\r\n\nReference (surface electrode)*\r\n\nGround (surface electrode)"
+    },
+    {
+      "id": 25,
+      "type": "topic",
+      "title": "F-wave – a compound muscle action potential evoked by antidromically stimulating",
+      "body": "F-wave – a compound muscle action potential evoked by antidromically stimulating a motor nerve\r\n\nfrom a muscle using maximal electrical stimulus. It represents the time required for a stimulus to\r\n\ntravel antidromically toward the spinal cord and to return orthodromically to the muscle along a very\r\n\nsmall percentage of the fibers."
+    },
+    {
+      "id": 34,
+      "type": "topic",
+      "title": "Initial Sensory NCS Settings",
+      "body": "Initial Sensory NCS Settings\r\n\nSweep speed 1–2 msec/division – generally 10 divisions are present in a horizontal screen.\r\n\nSensitivity (gain) 20 µV/division\r\n\nLow-frequency filter 2–10 Hz\r\n\nHigh-frequency filter 2 kHz"
+    },
+    {
+      "id": 33,
+      "type": "topic",
+      "title": "SWEEP SPEED AND SENSITIVITY",
+      "body": "SWEEP SPEED AND SENSITIVITY\r\n\nBoth the sweep speed and sensitivity can affect your NCS results. As the sensitivity is increased,\r\n\nthe onset latency will decrease. So, it is important to record all of your latency measurements\r\n\nusing the same sensitivity and sweep speed."
+    },
+    {
+      "id": 39,
+      "type": "topic",
+      "title": "MEASUREMENTS",
+      "body": "MEASUREMENTS\r\n\nThe machine will do most of your calculations for you, but you still need to measure the distance\r\n\nbetween stimulations and between the stimulation and the recording electrode when you are\r\n\ndetermining the conduction velocity. It is imperative that the measurements are done accurately.\r\n\nOther than a simple oversight of not correctly recording the distance with your tape measure,\r\n\nmeasurement errors can occur across joints if the patient's limb is moved in different positions,\r\n\nwhich changes the distance you are measuring. This commonly occurs in ulnar nerve studies\r\n\nwhen the elbow is straight and then becomes flexed. Therefore, during an ulnar nerve study, it\r\n\nis best to keep the elbow flexed and in the same position for the duration of that particular study\r\n\n(and at the same angle on both sides). Skin measurements are major sources of error in electro-\r\n\ndiagnostic studies. This can be minimized by increasing the distance of the nerve segment being\r\n\nstudied (i.e., the shorter the distance, the greater the effect of a measurement error). In general,\r\n\nwhen measuring distance, follow the course of the nerve, rather than measuring the shortest\r\n\ndistance between the stimulating and recording electrodes.\r\n\nBesides a tape measure, another necessary measurement device in an electrodiagnostic lab is\r\n\na thermometer. This is generally an infrared thermometer or a contact thermometer on the skin,\r\n\nwhich records the skin temperature. Abnormally cold extremities can falsely increase latencies\r\n\nand alter (generally increase) amplitudes, particularly of sensory nerves."
+    },
+    {
+      "id": 41,
+      "type": "topic",
+      "title": "The nerve conduction studies most commonly performed are compound muscle action ",
+      "body": "The nerve conduction studies most commonly performed are compound muscle action poten-\r\n\ntials (CMAPs) for motor nerves, sensory nerve action potentials (SNAPs) for sensory nerves,\r\n\ncompound nerve action potentials (CNAPs) for mixed (sensory and motor) nerves, and late\r\n\nresponses (primarily F-waves and H-reflexes)."
+    },
+    {
+      "id": 42,
+      "type": "topic",
+      "title": "As a rule, a nerve conduction study is done only on myelinated nerve fibers beca",
+      "body": "As a rule, a nerve conduction study is done only on myelinated nerve fibers because unmy-\r\n\nelinated fibers conduct extremely slowly and do not contribute significantly to the CMAPs and\r\n\n[...] SNAPs. A myelinated nerve fiber is composed of an axon and its surrounding myelin sheath\r\n\n(Fig. 4.3). Myelin is a connective covering surrounding motor nerve axons and many sensory\r\n\nnerve axons. Myelin is produced by Schwann cells and functions to greatly increase the speed of\r\n\nnerve conduction. Myelin acts as an excellent insulator and permits saltatory conduction. This\r\n\noccurs when depolarization takes place only at the nodes between the myelin sheaths (referred\r\n\nto as nodes of Ranvier). For this reason, myelinated axons have their voltage-dependent sodium\r\n\nchannels concentrated around the nodes, with few in the internodal regions. This type of\r\n\njumping (or saltatory) conduction, where time is not required to depolarize axons between the\r\n\nnodes, permits a greater than tenfold increase in velocity."
+    },
+    {
+      "id": 26,
+      "type": "topic",
+      "title": "Latency – the time interval between the onset of a stimulus and the onset of a r",
+      "body": "Latency – the time interval between the onset of a stimulus and the onset of a response (can also be\r\n\nreferred to as a motor latency or a sensory latency)."
+    },
+    {
+      "id": 20,
+      "type": "pdf-extract",
+      "title": "030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf",
+      "body": "030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf\nPage 0\nPDF: 030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf",
+      "pdfPage": 0
+    },
+    {
+      "id": 27,
+      "type": "topic",
+      "title": "H-reflex – a compound muscle action potential evoked by orthodromically stimulat",
+      "body": "H-reflex – a compound muscle action potential evoked by orthodromically stimulating sensory fibers,\r\n\nsynapsing at the spinal level and returning orthodromically via motor fibers. The response is thought\r\n\nto be due to a monosynaptic spinal reflex (Hoffmann reflex) found in normal adults in the\r\n\ngastrocnemius–soleus and flexor carpi radialis muscles"
+    },
+    {
+      "id": 10,
+      "type": "pdf-extract",
+      "title": "030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf",
+      "body": "030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf\nPage 0\nPDF: 030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf",
+      "pdfPage": 0
+    },
+    {
+      "id": 49,
+      "type": "topic",
+      "title": "Latency",
+      "body": "Latency\r\n\nThe latency represents the time it takes from stimulation of the nerve to the beginning of the\r\n\nSNAP or the CMAP. In a CMAP, the onset latency represents the arrival time (at the recording\r\n\nelectrode over the muscle) of the fastest-conducting nerve fibers. There is normal variation in\r\n\n[...] the conduction velocity of the individual nerve fibers producing a temporally dispersed curve.\r\n\nThis is usually a gaussian or bell-shaped curve representing the number of fibers (amplitude) and\r\n\nhow fast they are traveling (latency)."
+    },
+    {
+      "id": 45,
+      "type": "topic",
+      "title": "The Action Potential",
+      "body": "The Action Potential\r\n\nThe action potential is a summation of many potentials. In a CMAP, it is the summation of\r\n\nmotor units (muscle fibers) that are firing, while a SNAP is a summation of individual sensory\r\n\nnerve fibers, each with its own amplitude and slightly different conduction velocity. This sum-\r\n\nmation yields a characteristic (usually bell-shaped) curve. The part of the curve that begins to rise\r\n\nfirst represents components from the fastest fibers.The typical action potential is shown on a time\r\n\nversus amplitude chart (Fig. 4.4). The amplitude can be measured from onset to peak (A–B) or\r\n\nfrom peak to trough (B–C). The duration is the time from the onset to recovery (A–D). The area\r\n\nunder the curve is a function of the amplitude and the duration. Instead of relying solely on\r\n\namplitude, some electromyographers consider the area under the curve (measurement of the total\r\n\narea from negative departure from baseline to return to baseline) as a more accurate estimate of\r\n\nthe number of axons firing. (Although this may seem a bit counterintuitive, it's important to\r\n\nremember that in electrodiagnostic terminology, negative refers to an upward deflection from\r\n\nbaseline and 'positive' refers to a downward deflection from baseline.)"
+    },
+    {
+      "id": 18,
+      "type": "pdf-extract",
+      "title": "030-079_Status_epilepticus_2025-07.pdf",
+      "body": "030-079_Status_epilepticus_2025-07.pdf\nPage 0\nPDF: 030-079_Status_epilepticus_2025-07.pdf",
+      "pdfPage": 0
+    },
+    {
+      "id": 23,
+      "type": "pdf-extract",
+      "title": "030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf",
+      "body": "030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf\nPage 0\nPDF: 030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf",
+      "pdfPage": 0
+    },
+    {
+      "id": 32,
+      "type": "topic",
+      "title": "Initial Motor NCS Settings",
+      "body": "Initial Motor NCS Settings\r\n\nSweep speed 2–3 msec/division\r\n\nSensitivity (gain) 5000 µV/division (this means the same as 5 millivolts, 5 mV or 5 K microvolts)\r\n\nLow-frequency filter 10 Hz\r\n\nHigh-frequency filter 10 kHz"
+    },
+    {
+      "id": 36,
+      "type": "topic",
+      "title": "Large stimulus artifact may falsely decrease the amplitude and increase the late",
+      "body": "Large stimulus artifact may falsely decrease the amplitude and increase the latency. (Adapted \r\n\nfrom Preston DC, Shapiro BE. Electromyography and Neuromuscular Disorders. London: Butterworth-\r\n\nHeinemann; 1998.)"
+    },
+    {
+      "id": 38,
+      "type": "topic",
+      "title": "An important concept in NCS is to understand supramaximal stimulation. The botto",
+      "body": "An important concept in NCS is to understand supramaximal stimulation. The bottom line is\r\n\nthis: nearly all measurements made in NCS are done with the assumption that the strength of\r\n\nthe stimulus is high enough to depolarize every axon in the nerve (H-reflexes being a notable\r\n\n[...] exception). This is achieved by gradually increasing the stimulus strength until you reach the\r\n\npoint where the amplitude of the waveform is no longer increasing. That is the point of\r\n\nsupramaximal stimulation. If supramaximal stimulation is not achieved at a distal site, then you\r\n\nmight mistakenly interpret this recording as signifying axonal loss due to the low amplitude. At\r\n\na proximal site, this might appear to be conduction block (failure of an action potential to be\r\n\nconducted past a particular point whereas conduction is possible below the point of the block).\r\n\nIn both instances, anomalous innervation or nerve injury may be suspected incorrectly.\r\n\nOf course, the old adage, too much of a good thing is not good, applies to many things in\r\n\nlife. When it comes to stimulation in NCS, too much stimulation may cause co-stimulation of\r\n\nadjacent nerves or may stimulate nerves farther from the site (falsely lowering the latency). So,\r\n\nthe goal is to reach supramaximal stimulation without applying so much stimulation that adjacent\r\n\nnerves are also stimulated."
+    },
+    {
+      "id": 43,
+      "type": "topic",
+      "title": "While nerves have a physiological direction (from the spine in the case of motor",
+      "body": "While nerves have a physiological direction (from the spine in the case of motor nerves and\r\n\nto the spine in the case of sensory nerves), if a nerve is electrically stimulated anywhere along its\r\n\ncourse, waves of depolarization will travel in both directions from that point. Nerve conduction\r\n\ncan be measured orthodromically (physiological direction of nerve conduction) or antidromically\r\n\n(opposite to the physiological direction). Motor and sensory nerve action potentials can be\r\n\nmeasured through skin electrodes if the nerve is sufficiently superficial. It is more common (and\r\n\ntechnically easier) to measure motor nerves by recording electrical activity from the muscle it\r\n\ninnervates."
+    },
+    {
+      "id": 24,
+      "type": "pdf-extract",
+      "title": "Bradley's Neurology in Clinical Practice 8th Edition.pdf",
+      "body": "Bradley's Neurology in Clinical Practice 8th Edition.pdf\nPage 589\nPDF: Bradley's Neurology in Clinical Practice 8th Edition.pdf",
+      "pdfPage": 589
+    },
+    {
+      "id": 47,
+      "type": "topic",
+      "title": "Conduction Velocity",
+      "body": "Conduction Velocity\r\n\nConduction velocity is how fast the nerve is propagating an action potential. It can be calculated\r\n\nby the formula:\r\n\nvelocity = distance/time\r\n\nAs stated earlier, sensory nerves do not have a myoneural junction. Therefore, conduction velocity\r\n\ncan be calculated directly by measuring the time it takes (in milliseconds) for the propagated\r\n\naction potential to travel the measured distance (in centimeters). Because motor nerves do\r\n\nconduct across a myoneural junction, the conduction velocity cannot be measured directly.\r\n\nTherefore, we use the formula:\r\n\nvelocity = change in distance/change in time\r\n\n[...] At least two sites must be stimulated. (The same nerve is stimulated both proximally and distally\r\n\nwhile recording over the same muscle.) The difference in distance from the two stimulation sites\r\n\n[...] is then divided by the difference in latencies of the two action potentials obtained. Normal\r\n\nconduction velocities average above 50 m/sec in the upper extremities and above 40 m/sec in the\r\n\nlower extremities."
+    },
+    {
+      "id": 8,
+      "type": "pdf-extract",
+      "title": "Harrison's Neurology in Clinical Medicine, 3E",
+      "body": "Harrison's Neurology in Clinical Medicine, 3E\nPage 51\nPDF: Harrisons Neurology in Clinical Medicine, 3E.pdf",
+      "pdfPage": 51
+    },
+    {
+      "id": 31,
+      "type": "topic",
+      "title": "Every signal in both NCS and EMG passes through both",
+      "body": "Every signal in both NCS and EMG passes through both\r\n\na low-frequency and a high-frequency filter before being displayed. Low-frequency filters are called\r\n\nhigh pass because they let high-frequency signals pass through. The range at which there is a\r\n\ncut-off of low-frequency signals depends on how you set the filter. Similarly, high-frequency filters\r\n\nare called low pass because they let low-frequency signals through. It is important to understand\r\n\nthat there is always a trade-off when you use filters. The signal you want will be altered to some\r\n\ndegree. For example, as the low-frequency filter is reduced, more low-frequency signals pass\r\n\nthrough and the duration of the recorded potential will be slightly longer. Likewise, if the high-\r\n\nfrequency filter is decreased, more high-frequency signals are excluded and the latency of the\r\n\nrecorded potential may be delayed"
+    },
+    {
+      "id": 37,
+      "type": "topic",
+      "title": "Making sure",
+      "body": "Making sure\r\n\nthe ground is between the recording and stimulating electrodes can minimize stimulus artifact."
+    },
+    {
+      "id": 44,
+      "type": "topic",
+      "title": "Velocities in myelinated axons range from 40 to 70 m/sec. Unmyelinated axons, in",
+      "body": "Velocities in myelinated axons range from 40 to 70 m/sec. Unmyelinated axons, in contrast,\r\n\nare much slower – in the range of 1–5 m/sec. Unmyelinated axons do not conduct through\r\n\n[...] saltatory conduction but have voltage-dependent channels located uniformly throughout the\r\n\nnerve. The speed of nerve conduction is largely contingent upon the amount of time it takes for\r\n\nvoltage-dependent channels to open. Because unmyelinated nerves have a far greater number of\r\n\nchannels per length of nerve, they conduct at less than one-tenth the speed of a myelinated nerve.\r\n\nThe most important points to remember about myelin are:\r\n\n■ Myelin helps nerves propagate an action potential faster.\r\n\n■ The myelin sheath functions as insulator of the axon.\r\n\n■ In myelinated nerves, depolarization occurs only at areas devoid of myelin (nodes of\r\n\nRanvier) resulting in saltatory conduction.\r\n\n■ Conduction velocity is directly related to internodal length and efficiency of myelin\r\n\ninsulation"
+    }
+  ],
+  "generated": "2026-05-18T22:12:38.396Z"
+}
