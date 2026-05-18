@@ -217,8 +217,9 @@ function renderCard() {
     revealBtn.textContent = 'Reveal Answer';
     revealBtn.onclick = doReveal;
   } else {
-    revealBtn.textContent = 'Grade';
-    revealBtn.onclick = showGrades;
+    // Topics and PDF extracts are for reading/extraction — no grading needed
+    revealBtn.textContent = 'Done (read)';
+    revealBtn.onclick = () => applyGrade(5);
   }
 }
 
