@@ -40,7 +40,6 @@ const gradeRow       = $('grade-row');
 const syncStatus     = $('sync-status');
 const offlineBanner  = $('offline-banner');
 const serverUrlWrap  = $('server-url-wrap');
-const extractToolbar = $('extract-toolbar');
 const extractBadgeBtn= $('extract-badge-btn');
 const extractCount   = $('extract-count');
 const extractDrawer  = $('extract-drawer');
@@ -402,25 +401,14 @@ function onSelectionChange() {
     hideExtractToolbar(); return;
   }
 
-  positionExtractToolbar(range);
+  showSelectionBar();
 }
 
-function positionExtractToolbar(range) {
-  const rect  = range.getBoundingClientRect();
-  // clamp x so toolbar stays within viewport edges
-  const cx    = Math.max(60, Math.min(rect.left + rect.width / 2, window.innerWidth - 60));
-  const above = rect.top - 8;
-  const below = rect.bottom + 8;
-  // if selection is near the top (e.g. behind header), show toolbar below instead
-  const flip  = above < 60;
-
-  extractToolbar.style.left      = cx + 'px';
-  extractToolbar.style.top       = (flip ? below : above) + 'px';
-  extractToolbar.style.transform = flip ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
-  extractToolbar.classList.add('visible');
+function showSelectionBar() {
+  $('selection-bar').style.display = 'flex';
 }
 function hideExtractToolbar() {
-  extractToolbar.classList.remove('visible');
+  $('selection-bar').style.display = 'none';
 }
 
 function captureExtract() {

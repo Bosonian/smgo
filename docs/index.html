@@ -29,13 +29,6 @@
   </div>
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
 
-  <!-- Floating extract toolbar (appears above text selection) -->
-  <div id="extract-toolbar">
-    <button id="extract-btn">✂ Extract</button>
-    <button id="cloze-btn">[ ] Cloze</button>
-    <button id="qa-btn">🤖 Q&A</button>
-  </div>
-
   <!-- Loading screen -->
   <div id="screen-loading">
     <div class="spinner"></div>
@@ -66,6 +59,13 @@
 
   <!-- Action area -->
   <div id="action-area" style="display:none">
+    <!-- Appears when text is selected — anchored at bottom, away from Android copy/paste menu -->
+    <div id="selection-bar" style="display:none">
+      <span id="selection-label">Selected — add to SM:</span>
+      <button id="extract-btn">✂ Extract</button>
+      <button id="cloze-btn">[ ] Cloze</button>
+      <button id="qa-btn">🤖 Q&A</button>
+    </div>
     <button id="reveal-btn">Show Answer</button>
     <div id="grade-row"></div>
     <div id="card-meta-row">

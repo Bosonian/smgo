@@ -184,36 +184,6 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   white-space: nowrap;
 }
 
-/* ── Floating extract toolbar ─────────────── */
-#extract-toolbar {
-  position: fixed;
-  display: none;
-  transform: translate(-50%, -100%);
-  z-index: 200;
-  pointer-events: none;
-}
-#extract-toolbar.visible {
-  display: flex;
-  pointer-events: auto;
-  animation: pop-in .15s ease;
-}
-@keyframes pop-in {
-  from { opacity: 0; transform: translate(-50%, calc(-100% + 6px)); }
-  to   { opacity: 1; transform: translate(-50%, -100%); }
-}
-#extract-btn {
-  background: #15803d; color: #dcfce7;
-  border: none; border-radius: 8px;
-  padding: 8px 16px; font-size: .85rem; font-weight: 700;
-  cursor: pointer; white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,.5);
-}
-#extract-btn::before { content: ''; display: block; position: absolute;
-  bottom: -5px; left: 50%; transform: translateX(-50%);
-  border: 5px solid transparent; border-top-color: #15803d;
-  border-bottom: none; }
-#extract-btn { position: relative; }
-
 /* Selectable text areas */
 .selectable {
   user-select: text;
@@ -330,21 +300,34 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 }
 .primary-btn:active { opacity: .85; }
 
-/* ── Extract toolbar multi-button ────────── */
-#extract-toolbar { gap: 6px; }
+/* ── Selection bar (bottom, shown when text selected) ── */
+#selection-bar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+#selection-label {
+  font-size: .72rem; color: var(--muted); white-space: nowrap; flex: 1;
+}
+#extract-btn {
+  background: #15803d; color: #dcfce7;
+  border: none; border-radius: 8px;
+  padding: 7px 13px; font-size: .82rem; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+}
 #cloze-btn {
   background: #1e3a5f; color: #60a5fa;
   border: none; border-radius: 8px;
-  padding: 8px 14px; font-size: .85rem; font-weight: 700;
+  padding: 7px 13px; font-size: .82rem; font-weight: 700;
   cursor: pointer; white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,.5);
 }
 #qa-btn {
   background: #2d1f47; color: #c084fc;
   border: none; border-radius: 8px;
-  padding: 8px 14px; font-size: .85rem; font-weight: 700;
+  padding: 7px 13px; font-size: .82rem; font-weight: 700;
   cursor: pointer; white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,.5);
 }
 
 /* ── Modal overlay ────────────────────────── */
