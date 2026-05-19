@@ -187,6 +187,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
               case "qa":      applied = ApplyOneQA(payload);       break;
               case "cloze":   applied = ApplyOneCloze(payload);    break;
               case "grade":   applied = ApplyOneGrade(payload);    break;
+              case "dismiss": applied = ApplyOneDismiss(payload);  break;
+              case "edit":    applied = ApplyOneEdit(payload);     break;
             }
           }
           catch (Exception ex)
@@ -267,6 +269,36 @@ namespace SuperMemoAssistant.Plugins.SMGo
       Svc.SM.UI.ElementWdw.GoToElement(elementId);
       Thread.Sleep(400);
       Svc.SM.UI.ElementWdw.AssignGrade(grade);
+      return true;
+    }
+
+    private bool ApplyOneDismiss(JObject p)
+    {
+      var elementId = p["elementId"]?.Value<int>() ?? 0;
+      if (elementId <= 0) return false;
+      Svc.SM.UI.ElementWdw.GoToElement(elementId);
+      Thread.Sleep(400);
+      Svc.SM.UI.ElementWdw.Done();
+      return true;
+    }
+
+    private bool ApplyOneEdit(JObject p)
+    {
+      var parentId  = p["elementId"]?.Value<int>() ?? 0;
+      var text      = p["text"]?.ToString() ?? "";
+      var imageData = p["imageData"]?.ToString() ?? "";
+      if (parentId <= 0 || (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(imageData)))
+        return false;
+
+      var sb = new StringBuilder();
+      if (!string.IsNullOrWhiteSpace(text))
+        sb.Append($"<p style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</p>");
+      if (!string.IsNullOrWhiteSpace(imageData))
+        sb.Append($"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\">");
+
+      var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
       return true;
     }
 

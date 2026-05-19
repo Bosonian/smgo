@@ -26,7 +26,20 @@
 }
 
 html, body { height: 100%; }
-body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.6; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.6; overflow: hidden; display: flex; justify-content: center; }
+
+/* ── Tablet / Desktop centering ──────────────────────────── */
+@media (min-width: 700px) {
+  body { background: color-mix(in srgb, var(--bg) 70%, #000); }
+  #app { max-width: 820px; box-shadow: 0 0 60px rgba(0,0,0,.4); }
+  .card { padding: 20px 28px; }
+  .grade-btn { padding: 12px 6px; font-size: .85rem; }
+  #action-area { padding: 12px 24px 20px; }
+  #header { padding: 14px 24px 10px; }
+}
+@media (min-width: 1024px) {
+  .card-body { max-width: var(--read-max, none); }
+}
 
 /* ── Layout ───────────────────────────────── */
 #app { height: 100dvh; display: flex; flex-direction: column; }
@@ -432,3 +445,66 @@ mark.extracted-mark {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* ── Typography: font family ─────────────── */
+[data-font="sans"]  .card-body, [data-font="sans"]  .card-title { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+[data-font="serif"] .card-body, [data-font="serif"] .card-title { font-family: Georgia, 'Times New Roman', serif; }
+[data-font="mono"]  .card-body, [data-font="mono"]  .card-title { font-family: ui-monospace, 'Fira Code', Consolas, monospace; }
+
+/* ── Typography: font size ───────────────── */
+[data-size="sm"] .card-body { font-size: .80rem; }
+[data-size="md"] .card-body { font-size: .88rem; }
+[data-size="lg"] .card-body { font-size: 1.00rem; }
+[data-size="xl"] .card-body { font-size: 1.10rem; }
+
+/* ── Typography: line spacing ────────────── */
+[data-spacing="compact"]  .card-body { line-height: 1.45; }
+[data-spacing="normal"]   .card-body { line-height: 1.70; }
+[data-spacing="relaxed"]  .card-body { line-height: 2.05; }
+
+/* ── Typography: reading width (tablet+) ─── */
+@media (min-width: 700px) {
+  [data-width="narrow"] .card-body { max-width: 420px; margin-left: auto; margin-right: auto; }
+  [data-width="medium"] .card-body { max-width: 600px; margin-left: auto; margin-right: auto; }
+  [data-width="wide"]   .card-body { max-width: 100%; }
+}
+
+/* ── Typography panel ────────────────────── */
+#typo-panel {
+  display: none; flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px 14px;
+}
+#typo-panel.open { display: block; }
+
+.typo-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+.typo-label {
+  font-size: .72rem; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em; min-width: 52px;
+}
+.typo-options { display: flex; gap: 4px; flex-wrap: wrap; }
+.typo-options button {
+  background: var(--surface2); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 7px;
+  font-size: .75rem; padding: 5px 11px; cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.typo-options button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+#typo-toggle {
+  background: none; border: none; color: var(--muted);
+  font-size: .78rem; font-weight: 700; cursor: pointer;
+  padding: 3px 7px; border-radius: 6px; letter-spacing: .03em;
+}
+#typo-toggle.active { background: var(--accent); color: #fff; }
+
+/* ── Edit modal: image paste area ────────── */
+.edit-image-area {
+  border: 2px dashed var(--border); border-radius: 10px;
+  padding: 14px; text-align: center;
+  color: var(--muted); font-size: .82rem;
+  min-height: 68px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+}
+.edit-image-area:focus { outline: none; border-color: var(--accent); }

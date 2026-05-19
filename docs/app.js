@@ -46,11 +46,21 @@ async function supaUpsert(table, row) {
   } catch { return false; }
 }
 
+// ── Typography (apply before first paint) ─────────────────────────────────
+(function () {
+  const el = document.documentElement;
+  el.setAttribute('data-font',    localStorage.getItem('smgo_font')    || 'sans');
+  el.setAttribute('data-size',    localStorage.getItem('smgo_size')    || 'md');
+  el.setAttribute('data-spacing', localStorage.getItem('smgo_spacing') || 'normal');
+  el.setAttribute('data-width',   localStorage.getItem('smgo_width')   || 'medium');
+})();
+
 // ── State ──────────────────────────────────────────────────────────────────
-let cards    = [];
-let idx      = 0;
-let grades   = [];
-let revealed = false;
+let cards     = [];
+let idx       = 0;
+let grades    = [];
+let dismisses = [];
+let revealed  = false;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -193,15 +203,19 @@ function todayKey() { return 'smgo_progress_' + new Date().toISOString().slice(0
 function loadStoredProgress() {
   try {
     const saved = JSON.parse(localStorage.getItem(todayKey()) || '{}');
-    grades = saved.grades || [];
-    const done = new Set(grades.map(g => g.elementId));
+    grades    = saved.grades    || [];
+    dismisses = saved.dismisses || [];
+    const done = new Set([
+      ...grades.map(g => g.elementId),
+      ...dismisses.map(d => d.elementId),
+    ]);
     const next = cards.findIndex(c => !done.has(c.id));
     idx = next === -1 ? cards.length : next;
-  } catch { grades = []; }
+  } catch { grades = []; dismisses = []; }
 }
 function saveProgress() {
   const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
-  localStorage.setItem(todayKey(), JSON.stringify({ ...prev, grades, ts: Date.now() }));
+  localStorage.setItem(todayKey(), JSON.stringify({ ...prev, grades, dismisses, ts: Date.now() }));
 }
 
 // ── Screen management ──────────────────────────────────────────────────────
@@ -271,6 +285,7 @@ function renderCard() {
 
   const isDismissable = c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'image';
   $('dismiss-btn').style.display = isDismissable ? 'inline-flex' : 'none';
+  $('edit-btn').style.display = 'inline-flex';
 
   if (c.type === 'cloze') {
     revealBtn.textContent = 'Reveal Answer';
@@ -295,9 +310,19 @@ function skipCard() {
 function dismissCard() {
   const card = cards[idx];
   if (!card) return;
-  // Record dismiss for server sync
   const rec = { elementId: card.id, timestamp: new Date().toISOString() };
-  if (!isStaticMode()) {
+  dismisses.push(rec);
+  saveProgress();
+  showFlash('Dismissed');
+  // Route via Supabase first (works anywhere), fallback to local server
+  const supa = getSupabase();
+  if (supa) {
+    supaUpsert('smgo_queue', {
+      id:      `dismiss-${card.id}-${rec.timestamp}`,
+      type:    'dismiss',
+      payload: rec,
+    }).catch(() => {});
+  } else if (!isStaticMode()) {
     fetch(`${getServerUrl()}/api/dismiss`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rec),
@@ -949,6 +974,139 @@ $('extract-sync-btn').addEventListener('click', async () => {
   updateDrawerSyncTime();
   showFlash(`✓ ${synced} of ${total} synced`);
   setSyncStatus(`✓ Last sync: ${time}`, 'ok');
+});
+
+// ── Edit / Add Note modal ─────────────────────────────────────────────────
+let editImageData = null;
+
+function openEditModal() {
+  if (!cards[idx]) return;
+  $('edit-note-text').value = '';
+  editImageData = null;
+  $('edit-image-preview').style.display = 'none';
+  $('edit-image-clear').style.display = 'none';
+  $('edit-image-hint').style.display = '';
+  $('edit-modal').classList.add('open');
+  setTimeout(() => $('edit-note-text').focus(), 150);
+}
+
+async function saveEdit() {
+  const card = cards[idx];
+  if (!card) return;
+  const text = $('edit-note-text').value.trim();
+  if (!text && !editImageData) { showFlash('Add text or paste an image first.'); return; }
+
+  const rec = {
+    elementId:   card.id,
+    parentTitle: card.title,
+    text,
+    imageData:   editImageData || null,
+    timestamp:   new Date().toISOString(),
+  };
+
+  let ok = false;
+  const supa = getSupabase();
+  if (supa) {
+    ok = await supaUpsert('smgo_queue', {
+      id:      `edit-${card.id}-${rec.timestamp}`,
+      type:    'edit',
+      payload: rec,
+    });
+  }
+
+  $('edit-modal').classList.remove('open');
+  showFlash(ok ? '✓ Note queued for SM sync' : '✓ Note saved (sync needed)');
+}
+
+$('edit-image-area').addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        editImageData = ev.target.result;
+        const img = $('edit-image-preview');
+        img.src = editImageData;
+        img.style.display = 'block';
+        $('edit-image-clear').style.display = 'inline-block';
+        $('edit-image-hint').style.display = 'none';
+      };
+      reader.readAsDataURL(blob);
+      break;
+    }
+  }
+});
+
+$('edit-btn').addEventListener('click', openEditModal);
+$('edit-modal-close').addEventListener('click',  () => $('edit-modal').classList.remove('open'));
+$('edit-cancel-btn').addEventListener('click',   () => $('edit-modal').classList.remove('open'));
+$('edit-save-btn').addEventListener('click',     saveEdit);
+$('edit-image-clear').addEventListener('click', () => {
+  editImageData = null;
+  $('edit-image-preview').src = '';
+  $('edit-image-preview').style.display = 'none';
+  $('edit-image-clear').style.display = 'none';
+  $('edit-image-hint').style.display = '';
+});
+
+// ── Typography panel ──────────────────────────────────────────────────────
+const TYPO_DEFAULTS = { font: 'sans', size: 'md', spacing: 'normal', width: 'medium' };
+
+function syncTypoPanel() {
+  Object.keys(TYPO_DEFAULTS).forEach(key => {
+    const val = localStorage.getItem(`smgo_${key}`) || TYPO_DEFAULTS[key];
+    document.querySelectorAll(`[data-typo="${key}"] button`).forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.val === val);
+    });
+  });
+}
+
+$('typo-toggle').addEventListener('click', () => {
+  const panel = $('typo-panel');
+  const open  = panel.classList.toggle('open');
+  $('typo-toggle').classList.toggle('active', open);
+  if (open) syncTypoPanel();
+});
+
+document.querySelectorAll('[data-typo]').forEach(group => {
+  group.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-val]');
+    if (!btn) return;
+    const key = group.dataset.typo;
+    const val = btn.dataset.val;
+    localStorage.setItem(`smgo_${key}`, val);
+    document.documentElement.setAttribute(`data-${key}`, val);
+    group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+  });
+});
+
+// ── Keyboard shortcuts (desktop / MacBook) ────────────────────────────────
+document.addEventListener('keydown', e => {
+  const anyModal = ['edit-modal','qa-modal','cloze-modal'].some(id => $( id)?.classList.contains('open'));
+  if (anyModal) { if (e.key === 'Escape') { ['edit-modal','qa-modal','cloze-modal'].forEach(id => $( id)?.classList.remove('open')); } return; }
+  if ($('extract-drawer')?.classList.contains('open')) { if (e.key === 'Escape') closeExtractDrawer(); return; }
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case ' ':
+    case 'Enter':
+      e.preventDefault();
+      if (revealBtn.style.display !== 'none') revealBtn.click();
+      break;
+    case '0': case '1': case '2': case '3': case '4': case '5':
+      if (gradeRow.style.display === 'grid') { e.preventDefault(); applyGrade(parseInt(e.key)); }
+      break;
+    case 's': case 'S': e.preventDefault(); skipCard(); break;
+    case 'd': case 'D':
+      if ($('dismiss-btn').style.display !== 'none')
+        if (confirm('Dismiss this element? It will be marked Done in SuperMemo.')) dismissCard();
+      break;
+    case 'n': case 'N': e.preventDefault(); openEditModal(); break;
+    case 'Escape': $('typo-panel')?.classList.remove('open'); break;
+  }
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
