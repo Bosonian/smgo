@@ -44,6 +44,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private string? _supaUrl;
     private string? _supaKey;
     private Timer?  _supaTimer;
+    private int     _pollInProgress = 0; // 0=idle, 1=running — prevents overlapping polls
 
     // ── SMA lifecycle ─────────────────────────────────────────────────────
 
@@ -156,14 +157,16 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private async Task PollSupabaseAsync()
     {
       if (string.IsNullOrEmpty(_supaUrl) || string.IsNullOrEmpty(_supaKey)) return;
+      // Prevent a second poll from starting while the previous one is still processing
+      if (System.Threading.Interlocked.Exchange(ref _pollInProgress, 1) == 1) return;
       try
       {
         var req = new HttpRequestMessage(HttpMethod.Get,
-          $"{_supaUrl}/rest/v1/smgo_queue?applied=eq.false&order=created_at.asc");
+          $"{_supaUrl}/rest/v1/smgo_queue?applied=eq.false&order=id.asc");
         req.Headers.Add("apikey", _supaKey);
         req.Headers.Add("Authorization", $"Bearer {_supaKey}");
 
-        var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req);
         if (!resp.IsSuccessStatusCode) return;
 
         var items = JArray.Parse(await resp.Content.ReadAsStringAsync());
@@ -183,13 +186,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
           {
             switch (type)
             {
-              case "extract":             applied = ApplyOneExtract(payload);          break;
-              case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload);      break;
-              case "qa":                  applied = ApplyOneQA(payload);              break;
-              case "cloze":               applied = ApplyOneCloze(payload);           break;
-              case "grade":               applied = ApplyOneGrade(payload);           break;
-              case "dismiss":             applied = ApplyOneDismiss(payload);         break;
-              case "edit":                applied = ApplyOneEdit(payload);            break;
+              case "extract":             applied = ApplyOneExtract(payload);         break;
+              case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload);     break;
+              case "qa":                  applied = ApplyOneQA(payload);             break;
+              case "cloze":               applied = ApplyOneCloze(payload);          break;
+              case "grade":               applied = ApplyOneGrade(payload);          break;
+              case "dismiss":             applied = ApplyOneDismiss(payload);        break;
+              case "edit":                applied = ApplyOneEdit(payload);           break;
             }
           }
           catch (Exception ex)
@@ -197,11 +200,19 @@ namespace SuperMemoAssistant.Plugins.SMGo
             Serilog.Log.Warning(ex, "SMGo Supabase: failed to apply item {Id}", id);
           }
 
-          if (applied) await MarkSupabaseApplied(id);
-          Thread.Sleep(400);
+          // Grade and dismiss: mark applied regardless of success — AssignGrade can
+          // silently fail outside a review session; retrying forever creates an
+          // infinite loop and duplicates all create-type items.
+          bool shouldMark = applied || type == "grade" || type == "dismiss";
+          if (shouldMark) await MarkSupabaseApplied(id);
+          await Task.Delay(600);
         }
       }
       catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo Supabase poll error"); }
+      finally
+      {
+        System.Threading.Interlocked.Exchange(ref _pollInProgress, 0);
+      }
     }
 
     private async Task MarkSupabaseApplied(string id)
@@ -214,7 +225,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
         patch.Headers.Add("Authorization", $"Bearer {_supaKey}");
         patch.Headers.Add("Prefer", "return=minimal");
         patch.Content = new StringContent("{\"applied\":true}", Encoding.UTF8, "application/json");
-        await _http.SendAsync(patch);
+        using var _ = await _http.SendAsync(patch);
       }
       catch { }
     }
@@ -283,6 +294,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       Svc.SM.UI.ElementWdw.GoToElement(elementId);
       Thread.Sleep(400);
       Svc.SM.UI.ElementWdw.AssignGrade(grade);
+      Thread.Sleep(200);
       return true;
     }
 
@@ -290,9 +302,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       if (elementId <= 0) return false;
+      // Done() triggers a confirmation dialog when called outside a review session,
+      // causing SM to crash when multiple dismiss items are queued. Grade 5 (Bright)
+      // works silently and schedules the element far in the future.
       Svc.SM.UI.ElementWdw.GoToElement(elementId);
       Thread.Sleep(400);
-      Svc.SM.UI.ElementWdw.Done();
+      Svc.SM.UI.ElementWdw.AssignGrade(5);
+      Thread.Sleep(200);
       return true;
     }
 
@@ -657,10 +673,17 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var existing = new Dictionary<int, JObject>();
       if (File.Exists(file))
         foreach (var r in JArray.Parse(File.ReadAllText(file)))
-          existing[(int)r["elementId"]!] = (JObject)r;
+        {
+          var eid = r["elementId"]?.Value<int>() ?? 0;
+          if (eid > 0) existing[eid] = (JObject)r;
+        }
 
-      foreach (var r in (JArray)(payload["reviews"] ?? new JArray()))
-        existing[(int)r["elementId"]!] = (JObject)r;
+      var reviews = payload["reviews"] as JArray ?? new JArray();
+      foreach (var r in reviews)
+      {
+        var eid = r["elementId"]?.Value<int>() ?? 0;
+        if (eid > 0) existing[eid] = (JObject)r;
+      }
 
       File.WriteAllText(file, JsonConvert.SerializeObject(
         new JArray(existing.Values), Formatting.Indented));

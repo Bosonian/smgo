@@ -732,11 +732,11 @@ async function captureForQA() {
 
 // Models tried in order; first success is cached in localStorage for next time
 const GEMINI_MODELS = [
-  'gemini-3.5-flash',        // GA May 2026
-  'gemini-3.1-flash-lite',   // GA May 2026
-  'gemini-2.5-flash',        // stable
-  'gemini-2.5-flash-001',    // pinned stable variant
-  'gemini-2.0-flash',        // until June 1 2026
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-001',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
 ];
 
 function extractGeminiJson(raw) {
@@ -1207,11 +1207,12 @@ async function getPdfFile(filename) {
 }
 
 // ── PDF viewer ──────────────────────────────────────────────────────────────
-let pdfjsLib         = null;
-let pdfViewerDoc     = null;
-let pdfViewerPage    = 1;
-let pdfViewerCard    = null;
-let pdfViewerBlobUrl = null;
+let pdfjsLib           = null;
+let pdfViewerDoc       = null;
+let pdfViewerPage      = 1;
+let pdfViewerCard      = null;
+let pdfViewerBlobUrl   = null;
+let _activeRenderTask  = null; // cancel before each new render to avoid overlapping draws
 
 let _pdfJsPromise = null; // singleton load promise, prevents double-load race
 
@@ -1298,6 +1299,13 @@ async function openPdfViewer(card) {
 
 async function renderPdfPage(pageNum) {
   if (!pdfViewerDoc) return;
+
+  // Cancel any in-progress render so rapid prev/next clicks don't overlap on the canvas
+  if (_activeRenderTask) {
+    try { _activeRenderTask.cancel(); } catch {}
+    _activeRenderTask = null;
+  }
+
   const page     = await pdfViewerDoc.getPage(pageNum);
   const canvas   = $('pdf-canvas');
   const textDiv  = $('pdf-text-layer');
@@ -1312,17 +1320,30 @@ async function renderPdfPage(pageNum) {
   textDiv.style.width  = viewport.width  + 'px';
   textDiv.style.height = viewport.height + 'px';
 
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  const renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+  _activeRenderTask = renderTask;
+  try {
+    await renderTask.promise;
+  } catch (e) {
+    if (e?.name === 'RenderingCancelledException') return;
+    throw e;
+  }
+  _activeRenderTask = null;
 
   // Text layer for selection
   textDiv.innerHTML = '';
   const textContent = await page.getTextContent();
-  await pdfjsLib.renderTextLayer({
+  const textTask = pdfjsLib.renderTextLayer({
     textContentSource: textContent,
     container:         textDiv,
     viewport,
     textDivs:          [],
-  }).promise;
+  });
+  try {
+    await textTask.promise;
+  } catch (e) {
+    if (e?.name !== 'RenderingCancelledException') throw e;
+  }
 
   pdfViewerPage = pageNum;
   $('pdf-page-info').textContent    = `${pageNum} / ${pdfViewerDoc.numPages}`;
@@ -1341,6 +1362,7 @@ async function renderPdfPage(pageNum) {
 
 function closePdfViewer() {
   $('pdf-modal').classList.remove('open');
+  if (_activeRenderTask) { try { _activeRenderTask.cancel(); } catch {} _activeRenderTask = null; }
   if (pdfViewerDoc) { pdfViewerDoc.destroy(); pdfViewerDoc = null; }
   if (pdfViewerBlobUrl) { URL.revokeObjectURL(pdfViewerBlobUrl); pdfViewerBlobUrl = null; }
   pdfViewerCard = null;
@@ -1376,10 +1398,15 @@ function extractFromPdf() {
 
   const card = pdfViewerCard;
   const libParentId = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
+  const parentId = card.pdfElementId || libParentId || 0;
+  if (!parentId) {
+    showFlash('Set PDF parent ID in ⚙ Settings → 6 first');
+    return;
+  }
   const rec  = {
     id:          `pdfex-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     type:        'pdf-extract-create',
-    parentId:    card.pdfElementId || libParentId || card.id,
+    parentId,
     parentTitle: card.pdfFilename  || card.title,
     text,
     pdfPage:     pdfViewerPage - 1,  // store 0-indexed to match SM
