@@ -1153,6 +1153,17 @@ $('edit-image-clear').addEventListener('click', () => {
 // ── PDF folder (File System Access API + IndexedDB) ────────────────────────
 let _pdfDB = null;
 
+// In-memory permission cache — queryPermission on Android Chrome returns
+// 'prompt' repeatedly in the same session even after granting; avoid re-asking.
+const _permGranted = new WeakSet();
+async function ensurePermission(handle) {
+  if (_permGranted.has(handle)) return true;
+  let perm = await handle.queryPermission({ mode: 'read' });
+  if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+  if (perm === 'granted') { _permGranted.add(handle); return true; }
+  return false;
+}
+
 function openPdfDB() {
   if (_pdfDB) return Promise.resolve(_pdfDB);
   return new Promise((resolve, reject) => {
@@ -1414,9 +1425,7 @@ async function getPdfFile(filename) {
   const dirs = await getPdfDirHandles();
   for (const { handle } of dirs) {
     try {
-      let perm = await handle.queryPermission({ mode: 'read' });
-      if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
-      if (perm !== 'granted') continue;
+      if (!await ensurePermission(handle)) continue;
       const fh = await handle.getFileHandle(filename);
       return await fh.getFile();
     } catch {} // not in this folder — try next
@@ -2109,9 +2118,7 @@ async function openLibrary() {
 
     let pdfs = [], err = null;
     try {
-      let perm = await handle.queryPermission({ mode: 'read' });
-      if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
-      if (perm !== 'granted') throw new Error('Access denied');
+      if (!await ensurePermission(handle)) throw new Error('Access denied');
       for await (const entry of handle.values()) {
         if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf'))
           pdfs.push(entry.name);
@@ -2129,11 +2136,11 @@ async function openLibrary() {
         const hlCount  = parseInt(localStorage.getItem(`smgo_pdf_hlcount_${name}`) || '0', 10);
         const perPar   = parseInt(localStorage.getItem(`smgo_pdf_parent_${name}`) || '0', 10);
         const parLabel = perPar ? `#${perPar}` : (globalParent ? `#${globalParent}` : '–');
+        const metaLeft = [page ? `p. ${page}` : 'Not started', hlCount ? `${hlCount} extracts` : ''].filter(Boolean).join(' · ');
         html += `<div class="pdf-lib-item" data-name="${esc(name)}">
           <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
           <div class="pdf-lib-meta">
-            <span>${page ? `p. ${page}` : 'Not started'}</span>
-            ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
+            <span class="pdf-lib-meta-left">${esc(metaLeft)}</span>
             <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
           </div>
         </div>`;

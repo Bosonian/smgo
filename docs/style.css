@@ -788,24 +788,29 @@ mark.extracted-mark {
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background .1s;
-  display: flex; flex-direction: column; gap: 3px;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0; /* prevent flex children from overflowing */
 }
 .pdf-lib-item:active, .pdf-lib-item:hover { background: var(--surface2); }
 .pdf-lib-name {
   font-size: .9rem; font-weight: 500; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
 }
 .pdf-lib-meta {
-  font-size: .72rem; color: var(--muted);
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 6px;
+  min-width: 0;
 }
-.pdf-lib-hl-count { color: var(--green); font-weight: 600; }
+.pdf-lib-meta-left {
+  flex: 1; min-width: 0;
+  font-size: .72rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .pdf-lib-parent-btn {
   background: var(--surface2); border: 1px solid var(--border);
   color: var(--muted); border-radius: 7px;
   font-size: .68rem; padding: 3px 8px; cursor: pointer;
-  margin-left: auto; white-space: nowrap; line-height: 1.4;
-  flex-shrink: 0;
+  white-space: nowrap; line-height: 1.4; flex-shrink: 0;
 }
 .pdf-lib-parent-btn:hover { border-color: var(--accent); color: var(--accent); }
 
