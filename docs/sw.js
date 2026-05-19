@@ -1,5 +1,5 @@
-const CACHE = 'smgo-v2';
-const SHELL = ['./', './app.js', './style.css', './manifest.json'];
+const CACHE = 'smgo-v3';
+const SHELL = ['./', './index.html', './app.js', './style.css', './manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
