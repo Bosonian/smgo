@@ -1213,10 +1213,14 @@ function _mergeRects(rects) {
   const out = [];
   for (const r of rects) {
     const prev = out[out.length - 1];
-    if (prev && Math.abs(r.t - prev.t) < 2 && Math.abs((r.t + r.h) - (prev.t + prev.h)) < 2) {
+    // Use 30% of line height as tolerance — handles sub-pixel jitter on the same
+    // line without falsely merging adjacent lines (which are a full line height apart)
+    const tol = r.h * 0.3;
+    if (prev && Math.abs(r.t - prev.t) < tol && Math.abs(r.h - prev.h) < tol) {
       const newL = Math.min(r.l, prev.l);
       prev.w = Math.max(r.l + r.w, prev.l + prev.w) - newL;
       prev.l = newL;
+      prev.h = Math.max(prev.h, r.h);
     } else {
       out.push({ ...r });
     }
