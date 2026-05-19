@@ -1204,7 +1204,7 @@ function getSelectionRects() {
       h: (r.height / wr.height) * 100,
     });
   }
-  return _mergeRects(raw);
+  return _filterSingleColumn(_mergeRects(raw));
 }
 
 function _mergeRects(rects) {
@@ -1226,6 +1226,55 @@ function _mergeRects(rects) {
     }
   }
   return out;
+}
+
+// If rects span > 40% of canvas width they likely crossed a column boundary.
+// Find the x-gap between clusters and keep only the anchor's column.
+function _filterSingleColumn(rects) {
+  if (rects.length < 3) return rects;
+  const centers = rects.map(r => r.l + r.w / 2).sort((a, b) => a - b);
+  if (centers[centers.length - 1] - centers[0] < 40) return rects;
+  let maxGap = 0, divAt = null;
+  for (let i = 1; i < centers.length; i++) {
+    const g = centers[i] - centers[i - 1];
+    if (g > maxGap) { maxGap = g; divAt = (centers[i] + centers[i - 1]) / 2; }
+  }
+  if (!divAt || maxGap < 10) return rects;
+  // Use the selection anchor's column; fall back to whichever side has more rects
+  if (_pdfSelAnchor?.node?.parentElement) {
+    const wr = $('pdf-canvas-wrap')?.getBoundingClientRect();
+    const ar = _pdfSelAnchor.node.parentElement.getBoundingClientRect();
+    if (wr?.width) {
+      const ac = ((ar.left + ar.right) / 2 - wr.left) / wr.width * 100;
+      return rects.filter(r => ac < divAt ? (r.l + r.w / 2) < divAt : (r.l + r.w / 2) >= divAt);
+    }
+  }
+  const left = rects.filter(r => (r.l + r.w / 2) < divAt);
+  const right = rects.filter(r => (r.l + r.w / 2) >= divAt);
+  return left.length >= right.length ? left : right;
+}
+
+// Scan the rendered text layer spans to find the x-position of a column divider.
+// Returns the absolute-x midpoint of the biggest gap, or null for single-column pages.
+function detectPdfColumnDivider() {
+  const spans = Array.from($('pdf-text-layer')?.querySelectorAll('span') ?? []);
+  const wrap  = $('pdf-canvas-wrap');
+  if (!wrap || spans.length < 10) return null;
+  const wr = wrap.getBoundingClientRect();
+  const xs = spans
+    .filter(s => !s.classList.contains('endOfContent'))
+    .map(s => { const r = s.getBoundingClientRect(); return r.width > 2 ? r.left : null; })
+    .filter(x => x !== null && x > wr.left + 2 && x < wr.right - 2);
+  if (xs.length < 10) return null;
+  xs.sort((a, b) => a - b);
+  let maxGap = 0, gapAt = null;
+  for (let i = 1; i < xs.length; i++) {
+    const g = xs[i] - xs[i - 1];
+    if (g > maxGap) { maxGap = g; gapAt = (xs[i] + xs[i - 1]) / 2; }
+  }
+  const rel = gapAt ? (gapAt - wr.left) / wr.width : 0;
+  if (!gapAt || maxGap < wr.width * 0.08 || rel < 0.25 || rel > 0.75) return null;
+  return gapAt;
 }
 
 function renderHighlightLayer(pageNum) {
@@ -1331,6 +1380,8 @@ let _imgCropMode          = false;
 let _imgCropStart         = null;
 let _pdfStagedSegments    = [];
 let _pendingCropData      = null;
+let _pdfSelAnchor         = null; // { node, offset } — anchor for custom mouse selection
+let _pdfColDivX           = null; // detected column boundary (absolute x), or null
 
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -1502,6 +1553,8 @@ function closePdfViewer() {
   pdfViewerCard  = null;
   _pdfStagedSegments = [];
   _pendingCropData   = null;
+  _pdfSelAnchor      = null;
+  _pdfColDivX        = null;
   $('pdf-crop-choice-bar').style.display = 'none';
   updateStagedBar();
   window.getSelection()?.removeAllRanges();
@@ -1769,6 +1822,62 @@ function toggleImgCropMode() {
       $('pdf-crop-choice-bar').style.display = 'flex';
     }
   });
+})();
+
+// ── Column-aware text selection (mouse / stylus) ────────────────────────────
+// On desktop, override native drag-selection so it never crosses the column
+// boundary detected from the current page's text layer spans.
+// Touch long-press still uses native handles; _filterSingleColumn cleans up.
+(function wirePdfTextSelection() {
+  const layer = $('pdf-text-layer');
+
+  layer.addEventListener('pointerdown', e => {
+    if (_imgCropMode || e.button !== 0) return;
+    const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (!caret) return;
+    _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
+    _pdfColDivX   = detectPdfColumnDivider();
+    if (e.pointerType === 'mouse') {
+      e.preventDefault();                    // stop browser native selection
+      window.getSelection()?.removeAllRanges();
+      layer.setPointerCapture(e.pointerId);
+    }
+  });
+
+  layer.addEventListener('pointermove', e => {
+    if (!_pdfSelAnchor || e.pointerType !== 'mouse' || !(e.buttons & 1)) return;
+    let tx = e.clientX;
+    // Clamp x to the anchor's column so selection never jumps the gutter
+    if (_pdfColDivX !== null) {
+      const ar = _pdfSelAnchor.node.parentElement?.getBoundingClientRect();
+      if (ar) {
+        const ax = (ar.left + ar.right) / 2;
+        if (ax < _pdfColDivX) tx = Math.min(tx, _pdfColDivX - 4);
+        else                   tx = Math.max(tx, _pdfColDivX + 4);
+      }
+    }
+    const end = document.caretRangeFromPoint(tx, e.clientY);
+    if (!end) return;
+    try {
+      const anchor = document.createRange();
+      anchor.setStart(_pdfSelAnchor.node, _pdfSelAnchor.offset);
+      anchor.collapse(true);
+      const r = document.createRange();
+      if (anchor.compareBoundaryPoints(Range.START_TO_START, end) <= 0) {
+        r.setStart(_pdfSelAnchor.node, _pdfSelAnchor.offset);
+        r.setEnd(end.startContainer, end.startOffset);
+      } else {
+        r.setStart(end.startContainer, end.startOffset);
+        r.setEnd(_pdfSelAnchor.node, _pdfSelAnchor.offset);
+      }
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch {}
+  });
+
+  layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; });
+  layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; });
 })();
 
 async function renderCropToDataUrl(crop) {
