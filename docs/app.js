@@ -1884,67 +1884,73 @@ function toggleImgCropMode() {
 // On desktop, override native drag-selection so it never crosses the column
 // boundary detected from the current page's text layer spans.
 // Touch long-press still uses native handles; _filterSingleColumn cleans up.
+// S Pen never scrolls — it is selection-only; finger swipe handles scroll/page-turn.
+
+// Shared helper: select the word under (x, y) and fire the extract toolbar.
+function penSelectWordAt(x, y) {
+  const caret = document.caretRangeFromPoint(x, y);
+  if (!caret) return;
+  try {
+    const tmp = document.createRange();
+    tmp.setStart(caret.startContainer, caret.startOffset);
+    tmp.setEnd(caret.startContainer, caret.startOffset);
+    tmp.expand('word');
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(tmp);
+    scheduleSelCheck(100);
+  } catch {}
+}
+
+// Shared helper: apply a caret-range drag selection from a recorded anchor.
+function penApplyDragSelection(anchor, ex, ey) {
+  const end = document.caretRangeFromPoint(ex, ey);
+  if (!end) return;
+  try {
+    const aRange = document.createRange();
+    aRange.setStart(anchor.node, anchor.offset);
+    aRange.collapse(true);
+    const r = document.createRange();
+    if (aRange.compareBoundaryPoints(Range.START_TO_START, end) <= 0) {
+      r.setStart(anchor.node, anchor.offset);
+      r.setEnd(end.startContainer, end.startOffset);
+    } else {
+      r.setStart(end.startContainer, end.startOffset);
+      r.setEnd(anchor.node, anchor.offset);
+    }
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  } catch {}
+}
+
 (function wirePdfTextSelection() {
   const layer = $('pdf-text-layer');
 
-  // S Pen side button (button=2) on the text layer → select word under pen
   layer.addEventListener('pointerdown', e => {
     if (_imgCropMode) return;
+    // S Pen side button → instant word select + toolbar
     if (e.pointerType === 'pen' && e.button === 2) {
-      const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
-      if (!caret) return;
-      const r = document.createRange();
-      r.selectNodeContents(caret.startContainer);
-      // shrink to word boundary
-      try {
-        const tmp = document.createRange();
-        tmp.setStart(caret.startContainer, caret.startOffset);
-        tmp.setEnd(caret.startContainer, caret.startOffset);
-        tmp.expand('word');
-        r.setStart(tmp.startContainer, tmp.startOffset);
-        r.setEnd(tmp.endContainer, tmp.endOffset);
-      } catch { r.setStart(caret.startContainer, caret.startOffset); r.collapse(true); }
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
-      scheduleSelCheck(100);
+      penSelectWordAt(e.clientX, e.clientY);
       e.preventDefault();
       return;
     }
     if (e.button !== 0) return;
     const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
     if (!caret) return;
-    _pdfColDivX = detectPdfColumnDivider();
-    if (e.pointerType === 'mouse') {
-      // Mouse: capture immediately
-      _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset, captured: true };
+    _pdfColDivX   = detectPdfColumnDivider();
+    _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+      // Both mouse and S Pen capture immediately; pen never scrolls.
       e.preventDefault();
       window.getSelection()?.removeAllRanges();
       layer.setPointerCapture(e.pointerId);
-    } else if (e.pointerType === 'pen') {
-      // S Pen: record start pos but defer capture until we know direction (scroll vs select)
-      _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset,
-                        startX: e.clientX, startY: e.clientY, captured: false };
     }
   });
 
   layer.addEventListener('pointermove', e => {
     if (!_pdfSelAnchor || !(e.buttons & 1)) return;
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
-
-    // S Pen deferred-capture: decide scroll vs select on first meaningful move
-    if (e.pointerType === 'pen' && !_pdfSelAnchor.captured) {
-      const dx = Math.abs(e.clientX - _pdfSelAnchor.startX);
-      const dy = Math.abs(e.clientY - _pdfSelAnchor.startY);
-      if (dx + dy < 6) return;                // not moved enough to decide yet
-      if (dy > dx * 1.4) { _pdfSelAnchor = null; return; } // vertical → let scroll through
-      // Diagonal/horizontal → commit to selection
-      _pdfSelAnchor.captured = true;
-      e.preventDefault();
-      window.getSelection()?.removeAllRanges();
-      layer.setPointerCapture(e.pointerId);
-    }
-
     let tx = e.clientX;
     // Clamp x to the anchor's column so selection never jumps the gutter
     if (_pdfColDivX !== null) {
@@ -1955,28 +1961,45 @@ function toggleImgCropMode() {
         else                   tx = Math.max(tx, _pdfColDivX + 4);
       }
     }
-    const end = document.caretRangeFromPoint(tx, e.clientY);
-    if (!end) return;
-    try {
-      const anchor = document.createRange();
-      anchor.setStart(_pdfSelAnchor.node, _pdfSelAnchor.offset);
-      anchor.collapse(true);
-      const r = document.createRange();
-      if (anchor.compareBoundaryPoints(Range.START_TO_START, end) <= 0) {
-        r.setStart(_pdfSelAnchor.node, _pdfSelAnchor.offset);
-        r.setEnd(end.startContainer, end.startOffset);
-      } else {
-        r.setStart(end.startContainer, end.startOffset);
-        r.setEnd(_pdfSelAnchor.node, _pdfSelAnchor.offset);
-      }
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
-    } catch {}
+    penApplyDragSelection(_pdfSelAnchor, tx, e.clientY);
   });
 
   layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; });
   layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; });
+})();
+
+// S Pen selection on the review card text area — mirrors PDF text layer behaviour.
+// Finger scroll/swipe on the card area is unaffected (touch events only).
+(function wirePenCardSelection() {
+  const area = $('card-area');
+  let cardAnchor = null;
+
+  area.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'pen') return;
+    // Side button → instant word select + toolbar (works anywhere in the card)
+    if (e.button === 2) {
+      penSelectWordAt(e.clientX, e.clientY);
+      e.preventDefault();
+      return;
+    }
+    if (e.button !== 0) return;
+    // Only activate inside selectable text, not on buttons/badges
+    if (!e.target.closest('.selectable')) return;
+    const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (!caret) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    area.setPointerCapture(e.pointerId);
+    cardAnchor = { node: caret.startContainer, offset: caret.startOffset };
+  });
+
+  area.addEventListener('pointermove', e => {
+    if (!cardAnchor || e.pointerType !== 'pen' || !(e.buttons & 1)) return;
+    penApplyDragSelection(cardAnchor, e.clientX, e.clientY);
+  });
+
+  area.addEventListener('pointerup',     () => { if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
+  area.addEventListener('pointercancel', () => { cardAnchor = null; });
 })();
 
 async function renderCropToDataUrl(crop) {
