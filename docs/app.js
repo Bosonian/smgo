@@ -728,11 +728,11 @@ async function captureForQA() {
 
 // Models tried in order; first success is cached in localStorage for next time
 const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite-preview-06-17',
-  'gemini-2.5-flash-preview-05-20',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-3.5-flash',        // GA May 2026
+  'gemini-3.1-flash-lite',   // GA May 2026
+  'gemini-2.5-flash',        // stable
+  'gemini-2.5-flash-001',    // pinned stable variant
+  'gemini-2.0-flash',        // until June 1 2026
 ];
 
 function extractGeminiJson(raw) {
@@ -757,8 +757,10 @@ async function callGemini(text, apiKey) {
     generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 300 },
   });
 
-  // Put cached working model first so we skip the probe on subsequent calls
-  const cached = localStorage.getItem('smgo_gemini_model');
+  // Put cached working model first — but discard the cache if it's no longer in our list
+  const rawCached = localStorage.getItem('smgo_gemini_model');
+  const cached = rawCached && GEMINI_MODELS.includes(rawCached) ? rawCached : null;
+  if (rawCached && !cached) localStorage.removeItem('smgo_gemini_model');
   const models = cached
     ? [cached, ...GEMINI_MODELS.filter(m => m !== cached)]
     : GEMINI_MODELS;
