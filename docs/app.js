@@ -1146,11 +1146,117 @@ let _pdfDB = null;
 function openPdfDB() {
   if (_pdfDB) return Promise.resolve(_pdfDB);
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('smgo', 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+    const req = indexedDB.open('smgo', 2);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (e.oldVersion < 1) db.createObjectStore('handles');
+      if (e.oldVersion < 2) db.createObjectStore('highlights');
+    };
     req.onsuccess = e => { _pdfDB = e.target.result; resolve(_pdfDB); };
     req.onerror   = () => reject(req.error);
   });
+}
+
+async function loadPdfHighlights(filename) {
+  if (!filename) return [];
+  try {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('highlights','readonly').objectStore('highlights').get(filename);
+      req.onsuccess = () => resolve(req.result?.highlights || []);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch { return []; }
+}
+
+async function savePdfHighlights(filename, highlights) {
+  if (!filename) return;
+  try {
+    const db = await openPdfDB();
+    await new Promise((resolve, reject) => {
+      const req = db.transaction('highlights','readwrite').objectStore('highlights')
+        .put({ filename, highlights }, filename);
+      req.onsuccess = () => resolve();
+      req.onerror   = () => reject(req.error);
+    });
+    localStorage.setItem(`smgo_pdf_hlcount_${filename}`, String(highlights.length));
+  } catch {}
+}
+
+// ── Rect computation (ported from react-pdf-highlighter, MIT) ──────────────
+function getSelectionRects() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return [];
+  const range = sel.getRangeAt(0);
+  const wrap  = $('pdf-canvas-wrap');
+  if (!wrap) return [];
+  const wr = wrap.getBoundingClientRect();
+  if (!wr.width || !wr.height) return [];
+  const raw = [];
+  for (const r of range.getClientRects()) {
+    if (r.width < 1 || r.height < 1) continue;
+    if (r.right <= wr.left || r.left >= wr.right) continue;
+    if (r.bottom <= wr.top  || r.top  >= wr.bottom) continue;
+    raw.push({
+      l: ((r.left - wr.left) / wr.width)  * 100,
+      t: ((r.top  - wr.top)  / wr.height) * 100,
+      w: (r.width  / wr.width)  * 100,
+      h: (r.height / wr.height) * 100,
+    });
+  }
+  return _mergeRects(raw);
+}
+
+function _mergeRects(rects) {
+  if (!rects.length) return rects;
+  rects.sort((a, b) => a.t - b.t || a.l - b.l);
+  const out = [];
+  for (const r of rects) {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(r.t - prev.t) < 2 && Math.abs((r.t + r.h) - (prev.t + prev.h)) < 2) {
+      const newL = Math.min(r.l, prev.l);
+      prev.w = Math.max(r.l + r.w, prev.l + prev.w) - newL;
+      prev.l = newL;
+    } else {
+      out.push({ ...r });
+    }
+  }
+  return out;
+}
+
+function renderHighlightLayer(pageNum) {
+  const layer = $('pdf-highlight-layer');
+  if (!layer) return;
+  layer.innerHTML = '';
+  for (const hl of _pdfHighlights) {
+    if (hl.page !== pageNum) continue;
+    for (const r of hl.rects) {
+      const div = document.createElement('div');
+      div.className = `pdf-hl pdf-hl-${hl.type}`;
+      div.style.left   = r.l + '%';
+      div.style.top    = r.t + '%';
+      div.style.width  = r.w + '%';
+      div.style.height = r.h + '%';
+      layer.appendChild(div);
+    }
+  }
+}
+
+async function addAndRenderHighlight(filename, page, rects, text, type) {
+  if (!rects.length || !filename) return;
+  const hl = {
+    id:   `hl-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+    page, rects, text, type, ts: Date.now(),
+  };
+  _pdfHighlights.push(hl);
+  renderHighlightLayer(page);
+  savePdfHighlights(filename, _pdfHighlights); // fire and forget
+}
+
+function getPdfParentId(filename) {
+  const per = parseInt(localStorage.getItem(`smgo_pdf_parent_${filename}`) || '0', 10);
+  if (per) return per;
+  return parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
 }
 
 async function getPdfDirHandle() {
@@ -1207,14 +1313,18 @@ async function getPdfFile(filename) {
 }
 
 // ── PDF viewer ──────────────────────────────────────────────────────────────
-let pdfjsLib           = null;
-let pdfViewerDoc       = null;
-let pdfViewerPage      = 1;
-let pdfViewerCard      = null;
-let pdfViewerBlobUrl   = null;
-let _activeRenderTask  = null; // cancel before each new render to avoid overlapping draws
-
-let _pdfJsPromise = null; // singleton load promise, prevents double-load race
+let pdfjsLib              = null;
+let pdfViewerDoc          = null;
+let pdfViewerPage         = 1;
+let pdfViewerCard         = null;
+let pdfViewerBlobUrl      = null;
+let _activeRenderTask     = null;
+let _pdfJsPromise         = null;
+let _pdfHighlights        = [];
+let _pdfHighlightsFilename = null;
+let _pdfHeaderTimer       = null;
+let _imgCropMode          = false;
+let _imgCropStart         = null;
 
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -1235,16 +1345,30 @@ async function loadPdfJs() {
   return _pdfJsPromise;
 }
 
+function showPdfHeader() {
+  const hdr = $('pdf-modal-header');
+  hdr.classList.remove('hidden');
+  clearTimeout(_pdfHeaderTimer);
+  _pdfHeaderTimer = setTimeout(() => hdr.classList.add('hidden'), 3000);
+}
+
 async function openPdfViewer(card) {
   pdfViewerCard = card;
   $('pdf-modal').classList.add('open');
   $('pdf-title-label').textContent = card.pdfFilename || card.title || '';
-  $('pdf-loading-msg').style.display = 'block';
   $('pdf-canvas-wrap').style.display = 'none';
+  $('pdf-loading-msg').style.display = 'block';
   $('pdf-error-msg').style.display   = 'none';
-  $('pdf-extract-btn').style.display = 'none';
-  $('pdf-sel-label').style.display   = 'none';
   $('pdf-no-folder-msg').style.display = 'none';
+  updatePdfActionButtons(false);
+
+  // Load saved highlights for this PDF
+  const hlKey = card.pdfFilename || `card-${card.id}`;
+  _pdfHighlights        = await loadPdfHighlights(hlKey);
+  _pdfHighlightsFilename = hlKey;
+
+  // Start auto-hide header countdown
+  showPdfHeader();
 
   // pdfSource is either a URL string (blob: or http:) passed to PDF.js
   let pdfSource = null;
@@ -1284,7 +1408,6 @@ async function openPdfViewer(card) {
     pdfViewerPage = card.pdfPage != null ? card.pdfPage + 1 : 1;
     pdfViewerPage = Math.max(1, Math.min(pdfViewerPage, pdfViewerDoc.numPages));
     $('pdf-loading-msg').style.display = 'none';
-    $('pdf-canvas-wrap').style.display = '';
     await renderPdfPage(pdfViewerPage);
   } catch (e) {
     if (_blobUrl) URL.revokeObjectURL(_blobUrl);
@@ -1312,11 +1435,13 @@ async function renderPdfPage(pageNum) {
 
   const vpWidth  = $('pdf-viewport').clientWidth || window.innerWidth;
   const vp1      = page.getViewport({ scale: 1 });
-  const scale    = Math.max(0.5, Math.min((vpWidth - 24) / vp1.width, 3));
+  const scale    = Math.max(0.5, Math.min(vpWidth / vp1.width, 3));
   const viewport = page.getViewport({ scale });
 
   canvas.width  = viewport.width;
   canvas.height = viewport.height;
+  canvas.style.width  = '';
+  canvas.style.height = '';
   textDiv.style.width  = viewport.width  + 'px';
   textDiv.style.height = viewport.height + 'px';
 
@@ -1346,18 +1471,17 @@ async function renderPdfPage(pageNum) {
   }
 
   pdfViewerPage = pageNum;
-  $('pdf-page-info').textContent    = `${pageNum} / ${pdfViewerDoc.numPages}`;
-  $('pdf-prev-btn').disabled        = pageNum <= 1;
-  $('pdf-next-btn').disabled        = pageNum >= pdfViewerDoc.numPages;
+  $('pdf-page-info').textContent = `${pageNum} / ${pdfViewerDoc.numPages}`;
+  $('pdf-prev-btn').disabled     = pageNum <= 1;
+  $('pdf-next-btn').disabled     = pageNum >= pdfViewerDoc.numPages;
+  $('pdf-canvas-wrap').style.display = '';
 
-  // Persist reading position for library PDFs
-  if (pdfViewerCard?._fromLibrary && pdfViewerCard.pdfFilename) {
+  if (pdfViewerCard?._fromLibrary && pdfViewerCard.pdfFilename)
     localStorage.setItem(`smgo_pdf_pos_${pdfViewerCard.pdfFilename}`, String(pageNum));
-  }
 
-  // Clear any old text selection state
-  $('pdf-extract-btn').style.display = 'none';
-  $('pdf-sel-label').style.display   = 'none';
+  renderHighlightLayer(pageNum);
+  updatePdfActionButtons(false);
+  window.getSelection()?.removeAllRanges();
 }
 
 function closePdfViewer() {
@@ -1365,64 +1489,249 @@ function closePdfViewer() {
   if (_activeRenderTask) { try { _activeRenderTask.cancel(); } catch {} _activeRenderTask = null; }
   if (pdfViewerDoc) { pdfViewerDoc.destroy(); pdfViewerDoc = null; }
   if (pdfViewerBlobUrl) { URL.revokeObjectURL(pdfViewerBlobUrl); pdfViewerBlobUrl = null; }
-  pdfViewerCard = null;
+  clearTimeout(_pdfHeaderTimer);
+  if (_imgCropMode) { _imgCropMode = false; $('pdf-img-crop-overlay').classList.remove('active'); }
+  _pdfHighlights = []; _pdfHighlightsFilename = null;
+  _imgCropStart  = null;
+  pdfViewerCard  = null;
   window.getSelection()?.removeAllRanges();
+  updatePdfActionButtons(false);
+}
+
+function updatePdfActionButtons(hasSelection) {
+  $('pdf-extract-btn').disabled = !hasSelection;
+  $('pdf-cloze-btn').disabled   = !hasSelection;
+  $('pdf-qa-btn').disabled      = !hasSelection;
+  ['pdf-extract-btn','pdf-cloze-btn','pdf-qa-btn'].forEach(id =>
+    $(id).classList.toggle('sel-active', hasSelection)
+  );
 }
 
 // Watch for text selection inside the PDF text layer
 document.addEventListener('selectionchange', () => {
   if (!$('pdf-modal')?.classList.contains('open')) return;
+  if (_imgCropMode) return;
   const sel  = window.getSelection();
   const text = sel?.toString().trim() ?? '';
-  if (text.length < 2) {
-    $('pdf-extract-btn').style.display = 'none';
-    $('pdf-sel-label').style.display   = 'none';
-    return;
-  }
-  if (!sel.rangeCount) return;
+  if (text.length < 2) { updatePdfActionButtons(false); return; }
+  if (!sel.rangeCount)  { updatePdfActionButtons(false); return; }
   const inTextLayer = n => {
     const el = n instanceof Element ? n : n.parentElement;
     return !!el?.closest('.textLayer');
   };
   const range = sel.getRangeAt(0);
-  if (inTextLayer(range.startContainer) || inTextLayer(range.commonAncestorContainer)) {
-    $('pdf-extract-btn').style.display = '';
-    $('pdf-sel-label').style.display   = '';
-  }
+  const active = inTextLayer(range.startContainer) || inTextLayer(range.commonAncestorContainer);
+  updatePdfActionButtons(active);
 });
 
-function extractFromPdf() {
+async function extractFromPdf() {
   const sel  = window.getSelection();
   const text = sel?.toString().trim() ?? '';
   if (!text || !pdfViewerCard) return;
 
-  const card = pdfViewerCard;
-  const libParentId = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
-  const parentId = card.pdfElementId || libParentId || 0;
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
   if (!parentId) {
-    showFlash('Set PDF parent ID in ⚙ Settings → 6 first');
+    showFlash('Set SM parent in library (SM button) or ⚙ Settings → 6');
     return;
   }
-  const rec  = {
+
+  const rects = getSelectionRects();
+  if (rects.length) addAndRenderHighlight(filename, pdfViewerPage, rects, text, 'extract');
+
+  const rec = {
     id:          `pdfex-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     type:        'pdf-extract-create',
     parentId,
-    parentTitle: card.pdfFilename  || card.title,
+    parentTitle: filename || pdfViewerCard.title,
     text,
-    pdfPage:     pdfViewerPage - 1,  // store 0-indexed to match SM
+    pdfPage:     pdfViewerPage - 1,
     timestamp:   new Date().toISOString(),
     synced:      false,
   };
-
   pendingExtracts.push(rec);
   saveExtracts();
   sel.removeAllRanges();
-  $('pdf-extract-btn').style.display = 'none';
-  $('pdf-sel-label').style.display   = 'none';
-  showFlash(`Extracted: "${text.slice(0,40)}${text.length>40?'…':''}"`);
-
-  // Immediate upload
+  updatePdfActionButtons(false);
+  showFlash(`✂ "${text.slice(0,40)}${text.length>40?'…':''}"`);
   uploadExtract(rec);
+}
+
+function pdfCaptureForCloze() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !pdfViewerCard) return;
+
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
+  if (!parentId) { showFlash('Set SM parent in library first'); return; }
+
+  const rects = getSelectionRects();
+  if (rects.length) addAndRenderHighlight(filename, pdfViewerPage, rects, text, 'cloze');
+
+  clozeParentId    = parentId;
+  clozeParentTitle = filename || pdfViewerCard.title;
+  clozeWords       = text.split(/(\s+)/).map(t => ({ word: t, blank: false, isSpace: /^\s+$/.test(t) }));
+  sel.removeAllRanges();
+  updatePdfActionButtons(false);
+  renderClozeEditor();
+  $('cloze-modal').classList.add('open');
+}
+
+async function pdfCaptureForQA() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !pdfViewerCard) return;
+
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
+  if (!parentId) { showFlash('Set SM parent in library first'); return; }
+
+  let apiKey = localStorage.getItem('smgo_gemini_key') || '';
+  if (!apiKey) {
+    apiKey = prompt('Enter your Gemini API key:') || '';
+    if (!apiKey) return;
+    localStorage.setItem('smgo_gemini_key', apiKey.trim());
+    apiKey = apiKey.trim();
+  }
+
+  const rects = getSelectionRects();
+  if (rects.length) addAndRenderHighlight(filename, pdfViewerPage, rects, text, 'qa');
+
+  qaParentId    = parentId;
+  qaParentTitle = filename || pdfViewerCard.title;
+  sel.removeAllRanges();
+  updatePdfActionButtons(false);
+
+  $('qa-loading').style.display = 'block';
+  $('qa-form').style.display    = 'none';
+  $('qa-modal').classList.add('open');
+  try {
+    const { question, answer } = await callGemini(text, apiKey);
+    $('qa-question').value        = question;
+    $('qa-answer').value          = answer;
+    $('qa-loading').style.display = 'none';
+    $('qa-form').style.display    = 'block';
+  } catch (err) {
+    $('qa-modal').classList.remove('open');
+    alert(`Gemini error: ${err.message}`);
+  }
+}
+
+function markPageAsRead() {
+  const filename = _pdfHighlightsFilename;
+  if (!filename) return;
+  // Full-page read marker — remove old read marker for this page first
+  _pdfHighlights = _pdfHighlights.filter(h => !(h.page === pdfViewerPage && h.type === 'read'));
+  addAndRenderHighlight(filename, pdfViewerPage, [{l:0,t:0,w:100,h:100}], '', 'read');
+  showFlash('◉ Page marked as read');
+}
+
+// ── Image region extraction ─────────────────────────────────────────────────
+function toggleImgCropMode() {
+  _imgCropMode = !_imgCropMode;
+  $('pdf-img-btn').classList.toggle('mode-active', _imgCropMode);
+  const overlay = $('pdf-img-crop-overlay');
+  overlay.classList.toggle('active', _imgCropMode);
+  // Disable text layer pointer events so drag works
+  $('pdf-text-layer').style.pointerEvents = _imgCropMode ? 'none' : '';
+  if (!_imgCropMode) {
+    _imgCropStart = null;
+    const box = document.getElementById('pdf-img-crop-box');
+    if (box) box.remove();
+  }
+}
+
+(function wireImgCrop() {
+  const overlay = $('pdf-img-crop-overlay');
+
+  overlay.addEventListener('pointerdown', e => {
+    if (!_imgCropMode) return;
+    const r = overlay.getBoundingClientRect();
+    _imgCropStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+    overlay.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  overlay.addEventListener('pointermove', e => {
+    if (!_imgCropMode || !_imgCropStart) return;
+    const r    = overlay.getBoundingClientRect();
+    const cx   = e.clientX - r.left;
+    const cy   = e.clientY - r.top;
+    const left = Math.min(_imgCropStart.x, cx);
+    const top  = Math.min(_imgCropStart.y, cy);
+    const w    = Math.abs(cx - _imgCropStart.x);
+    const h    = Math.abs(cy - _imgCropStart.y);
+    let box = document.getElementById('pdf-img-crop-box');
+    if (!box) { box = document.createElement('div'); box.id = 'pdf-img-crop-box'; overlay.appendChild(box); }
+    Object.assign(box.style, { left: left+'px', top: top+'px', width: w+'px', height: h+'px' });
+  });
+
+  overlay.addEventListener('pointerup', async e => {
+    if (!_imgCropMode || !_imgCropStart) return;
+    const r    = overlay.getBoundingClientRect();
+    const cx   = e.clientX - r.left;
+    const cy   = e.clientY - r.top;
+    const cropRect = {
+      left:   Math.min(_imgCropStart.x, cx),
+      top:    Math.min(_imgCropStart.y, cy),
+      width:  Math.abs(cx - _imgCropStart.x),
+      height: Math.abs(cy - _imgCropStart.y),
+    };
+    toggleImgCropMode();
+    if (cropRect.width < 8 || cropRect.height < 8) return;
+    await extractImageCrop(cropRect);
+  });
+})();
+
+async function extractImageCrop(crop) {
+  if (!pdfViewerDoc || !pdfViewerCard) return;
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
+  if (!parentId) { showFlash('Set SM parent in library first'); return; }
+
+  try {
+    showFlash('Rendering image…');
+    const page  = await pdfViewerDoc.getPage(pdfViewerPage);
+    const vp1   = page.getViewport({ scale: 1 });
+    const cur   = ($('pdf-viewport').clientWidth || window.innerWidth) / vp1.width;
+    const scale = Math.max(0.5, Math.min(cur, 3)) * 2; // 2× for quality
+    const vp    = page.getViewport({ scale });
+    const off   = document.createElement('canvas');
+    off.width   = vp.width; off.height = vp.height;
+    await page.render({ canvasContext: off.getContext('2d'), viewport: vp }).promise;
+
+    const dst = document.createElement('canvas');
+    dst.width  = crop.width  * 2;
+    dst.height = crop.height * 2;
+    dst.getContext('2d').drawImage(off,
+      crop.left*2, crop.top*2, crop.width*2, crop.height*2,
+      0, 0, dst.width, dst.height);
+
+    const dataUrl = await new Promise(res => dst.toBlob(b => {
+      const fr = new FileReader();
+      fr.onloadend = () => res(fr.result);
+      fr.readAsDataURL(b);
+    }, 'image/png'));
+
+    const rec = {
+      id:          `pdfimg-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+      type:        'image-extract',
+      parentId,
+      parentTitle: filename || pdfViewerCard.title,
+      imageData:   dataUrl,
+      pdfPage:     pdfViewerPage - 1,
+      timestamp:   new Date().toISOString(),
+      synced:      false,
+    };
+    pendingExtracts.push(rec);
+    saveExtracts();
+    showFlash('🖼 Image extracted');
+    uploadExtract(rec);
+  } catch (err) {
+    showFlash('Image extraction failed');
+    console.error(err);
+  }
 }
 
 // ── PDF Library ─────────────────────────────────────────────────────────────
@@ -1484,28 +1793,60 @@ async function openLibrary() {
     return;
   }
 
+  const globalParent = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
   listEl.innerHTML = pdfs.map(name => {
-    const page = localStorage.getItem(`smgo_pdf_pos_${name}`);
+    const page     = localStorage.getItem(`smgo_pdf_pos_${name}`);
+    const hlCount  = parseInt(localStorage.getItem(`smgo_pdf_hlcount_${name}`) || '0', 10);
+    const perPar   = parseInt(localStorage.getItem(`smgo_pdf_parent_${name}`) || '0', 10);
+    const parLabel = perPar ? `#${perPar}` : (globalParent ? `#${globalParent}` : '–');
     return `<div class="pdf-lib-item" data-name="${esc(name)}">
-      <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
-      <div class="pdf-lib-meta">${page ? `Last page: ${page}` : 'Not started'}</div>
+      <div class="pdf-lib-info">
+        <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
+        <div class="pdf-lib-meta">
+          <span>${page ? `p. ${page}` : 'Not started'}</span>
+          ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
+        </div>
+      </div>
+      <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
     </div>`;
   }).join('');
 
   listEl.querySelectorAll('.pdf-lib-item').forEach(el => {
-    el.addEventListener('click', () => openPdfFromLibrary(el.dataset.name));
+    el.addEventListener('click', e => {
+      if (e.target.closest('.pdf-lib-parent-btn')) return;
+      openPdfFromLibrary(el.dataset.name);
+    });
+  });
+  listEl.querySelectorAll('.pdf-lib-parent-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const name    = btn.dataset.name;
+      const current = localStorage.getItem(`smgo_pdf_parent_${name}`) || '';
+      const id      = prompt(`SM parent element ID for:\n"${name.replace(/\.pdf$/i,'')}"\n(blank = use global default #${globalParent||'none'}):`, current);
+      if (id === null) return;
+      if (id.trim() && /^\d+$/.test(id.trim())) {
+        localStorage.setItem(`smgo_pdf_parent_${name}`, id.trim());
+        btn.textContent = `SM: #${id.trim()}`;
+        showFlash('Parent ID saved');
+      } else if (!id.trim()) {
+        localStorage.removeItem(`smgo_pdf_parent_${name}`);
+        btn.textContent = `SM: ${globalParent ? `#${globalParent}` : '–'}`;
+        showFlash('Using global parent');
+      } else {
+        alert('Must be a numeric element ID.');
+      }
+    });
   });
 }
 
 function openPdfFromLibrary(filename) {
-  const parentId  = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
   const savedPage = parseInt(localStorage.getItem(`smgo_pdf_pos_${filename}`) || '1', 10) - 1;
   openPdfViewer({
     id:           0,
     type:         'pdf-extract',
     title:        filename.replace(/\.pdf$/i, ''),
     pdfFilename:  filename,
-    pdfElementId: parentId || null,
+    pdfElementId: getPdfParentId(filename) || null,
     pdfPage:      Math.max(0, savedPage),
     _fromLibrary: true,
   });
@@ -1528,13 +1869,20 @@ $('pdf-next-btn').addEventListener('click', () => {
   if (pdfViewerDoc && pdfViewerPage < pdfViewerDoc.numPages) renderPdfPage(pdfViewerPage + 1);
 });
 $('pdf-extract-btn').addEventListener('click', extractFromPdf);
+$('pdf-cloze-btn').addEventListener('click', pdfCaptureForCloze);
+$('pdf-qa-btn').addEventListener('click', pdfCaptureForQA);
+$('pdf-img-btn').addEventListener('click', toggleImgCropMode);
+$('pdf-mark-btn').addEventListener('click', markPageAsRead);
 $('pdf-set-folder-btn').addEventListener('click', async () => {
   const handle = await pickPdfFolder();
   if (handle && pdfViewerCard) {
-    // Retry loading the PDF now that we have the folder
     $('pdf-no-folder-msg').style.display = 'none';
     await openPdfViewer(pdfViewerCard);
   }
+});
+// Tap viewport to restore auto-hidden header
+$('pdf-viewport').addEventListener('click', () => {
+  if ($('pdf-modal').classList.contains('open')) showPdfHeader();
 });
 $('pdf-open-btn').addEventListener('click', () => {
   if (cards[idx]) openPdfViewer(cards[idx]);

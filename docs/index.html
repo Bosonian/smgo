@@ -192,27 +192,33 @@
   <div id="pdf-modal" class="modal pdf-modal">
     <div class="pdf-modal-inner">
       <div id="pdf-modal-header">
-        <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
-        <span id="pdf-page-info">–</span>
-        <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
+        <button id="pdf-close-btn" class="pdf-hdr-close" title="Close">✕</button>
         <span id="pdf-title-label"></span>
-        <button id="pdf-close-btn" class="pdf-nav-btn" title="Close">✕</button>
       </div>
       <div id="pdf-viewport">
         <div id="pdf-loading-msg">Loading PDF…</div>
         <div id="pdf-error-msg" style="display:none"></div>
+        <div id="pdf-no-folder-msg" style="display:none">
+          <p>No PDF folder set.</p>
+          <button id="pdf-set-folder-btn" class="primary-btn">Select folder</button>
+        </div>
         <div id="pdf-canvas-wrap">
           <canvas id="pdf-canvas"></canvas>
+          <div id="pdf-highlight-layer"></div>
           <div id="pdf-text-layer" class="textLayer"></div>
+          <div id="pdf-img-crop-overlay"></div>
         </div>
       </div>
       <div id="pdf-action-bar">
-        <span id="pdf-sel-label" style="display:none">Text selected</span>
-        <button id="pdf-extract-btn" class="primary-btn" style="display:none">✂ Extract to SM</button>
-        <div id="pdf-no-folder-msg" style="display:none">
-          <span>No PDF folder set.</span>
-          <button id="pdf-set-folder-btn" class="secondary-btn">Select folder</button>
-        </div>
+        <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
+        <span id="pdf-page-info">–</span>
+        <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
+        <div class="pdf-bar-sep"></div>
+        <button id="pdf-extract-btn" class="pdf-act-btn" title="Extract selection to SM" disabled>✂</button>
+        <button id="pdf-cloze-btn"   class="pdf-act-btn" title="Create cloze"            disabled>[ ]</button>
+        <button id="pdf-qa-btn"      class="pdf-act-btn" title="Generate Q&amp;A"        disabled>🤖</button>
+        <button id="pdf-img-btn"     class="pdf-act-btn" title="Extract image region">🖼</button>
+        <button id="pdf-mark-btn"    class="pdf-act-btn" title="Mark page as read">◉</button>
       </div>
     </div>
   </div>
