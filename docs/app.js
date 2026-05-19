@@ -578,7 +578,9 @@ function scheduleSelCheck(ms) {
 
 document.addEventListener('selectionchange', () => scheduleSelCheck(250));
 // touchend is more reliable on mobile — fire after finger lifts
-document.addEventListener('touchend', () => scheduleSelCheck(350), { passive: true });
+document.addEventListener('touchend',   () => scheduleSelCheck(350), { passive: true });
+// stylus lift — same delay as touch so the selection rect is settled
+document.addEventListener('pointerup',  e => { if (e.pointerType === 'pen') scheduleSelCheck(200); }, { passive: true });
 
 function onSelectionChange() {
   const sel  = window.getSelection();
@@ -1891,7 +1893,7 @@ function toggleImgCropMode() {
     if (!caret) return;
     _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
     _pdfColDivX   = detectPdfColumnDivider();
-    if (e.pointerType === 'mouse') {
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
       e.preventDefault();                    // stop browser native selection
       window.getSelection()?.removeAllRanges();
       layer.setPointerCapture(e.pointerId);
@@ -1899,7 +1901,7 @@ function toggleImgCropMode() {
   });
 
   layer.addEventListener('pointermove', e => {
-    if (!_pdfSelAnchor || e.pointerType !== 'mouse' || !(e.buttons & 1)) return;
+    if (!_pdfSelAnchor || (e.pointerType !== 'mouse' && e.pointerType !== 'pen') || !(e.buttons & 1)) return;
     let tx = e.clientX;
     // Clamp x to the anchor's column so selection never jumps the gutter
     if (_pdfColDivX !== null) {
@@ -2287,6 +2289,33 @@ document.addEventListener('keydown', e => {
     case 'Escape': $('typo-panel')?.classList.remove('open'); break;
   }
 });
+
+// ── Supabase background polling ────────────────────────────────────────────
+let _pollTimer = null;
+const POLL_INTERVAL_MS = 30_000;
+
+async function _pollTick() {
+  if (!getSupabase()) return;
+  await syncAllPending();
+  await syncAllExtracts();
+}
+
+function _startPolling() {
+  if (_pollTimer) return;
+  _pollTick();
+  _pollTimer = setInterval(_pollTick, POLL_INTERVAL_MS);
+}
+
+function _stopPolling() {
+  clearInterval(_pollTimer);
+  _pollTimer = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') _startPolling();
+  else _stopPolling();
+});
+if (document.visibilityState === 'visible') _startPolling();
 
 // ── Start ──────────────────────────────────────────────────────────────────
 init();
