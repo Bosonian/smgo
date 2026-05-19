@@ -736,7 +736,15 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private void ServeStatic(HttpListenerRequest req, HttpListenerResponse res)
     {
       var urlPath  = req.Url!.AbsolutePath == "/" ? "index.html" : req.Url.AbsolutePath.TrimStart('/');
-      var filePath = Path.Combine(DataDir, "docs", urlPath.Replace('/', Path.DirectorySeparatorChar));
+      var docsRoot = Path.GetFullPath(Path.Combine(DataDir, "docs"));
+      var filePath = Path.GetFullPath(Path.Combine(docsRoot, urlPath.Replace('/', Path.DirectorySeparatorChar)));
+
+      // Reject path traversal attempts
+      if (!filePath.StartsWith(docsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+          && !filePath.Equals(docsRoot, StringComparison.OrdinalIgnoreCase))
+      {
+        res.StatusCode = 403; res.Close(); return;
+      }
 
       if (!File.Exists(filePath))
       {
@@ -770,7 +778,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private static string ReadBody(HttpListenerRequest req)
     {
-      using var sr = new StreamReader(req.InputStream, req.ContentEncoding);
+      using var sr = new StreamReader(req.InputStream, Encoding.UTF8);
       return sr.ReadToEnd();
     }
 

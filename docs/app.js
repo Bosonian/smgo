@@ -115,7 +115,7 @@ async function initFromSupabase() {
   const supa = getSupabase();
   if (!supa) return false;
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDate();
     const res = await fetch(
       `${supa.url}/rest/v1/smgo_daily?date=eq.${today}&select=data`,
       { headers: { apikey: supa.key, Authorization: `Bearer ${supa.key}` } }
@@ -198,7 +198,11 @@ async function initServer() {
 }
 
 // ── Progress persistence ───────────────────────────────────────────────────
-function todayKey() { return 'smgo_progress_' + new Date().toISOString().slice(0, 10); }
+function localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function todayKey() { return 'smgo_progress_' + localDate(); }
 
 function loadStoredProgress() {
   try {
@@ -285,7 +289,7 @@ function renderCard() {
 
   const isDismissable = c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'image';
   $('dismiss-btn').style.display = isDismissable ? 'inline-flex' : 'none';
-  $('edit-btn').style.display = 'inline-flex';
+  $('edit-btn').style.display = (getSupabase() || !isStaticMode()) ? 'inline-flex' : 'none';
 
   if (c.type === 'cloze') {
     revealBtn.textContent = 'Reveal Answer';
@@ -402,23 +406,20 @@ function applyGrade(grade) {
 
 // ── Sync & Done ────────────────────────────────────────────────────────────
 async function syncAndDone() {
-  if (isStaticMode()) {
-    const serverUrl = localStorage.getItem('smgo_server') || '';
-    const hint = serverUrl
-      ? `Open ${serverUrl} on home network to sync grades.`
-      : 'Open SMGo on your home network to sync grades.';
-    showScreen('done', `${grades.length} items reviewed.`, hint);
-    setSyncStatus('Grades saved locally – sync at home', 'fail');
+  // If no Supabase and no local server, grades are local-only
+  if (isStaticMode() && !getSupabase()) {
+    showScreen('done', `${grades.length} items reviewed.`, 'Configure Supabase in ⚙ to sync grades from anywhere.');
+    setSyncStatus('Grades saved locally – configure Supabase to sync', 'fail');
     return;
   }
   showScreen('done', `${grades.length} items reviewed.`, 'Syncing…');
   const ok = await pushTodayGrades();
   if (ok) {
     $('done-msg').textContent = `${grades.length} grades synced.`;
-    $('done-sub').textContent = 'Run apply-grades.bat to apply in SuperMemo.';
+    $('done-sub').textContent = 'SM plugin will apply them automatically on next poll.';
     setSyncStatus(`✓ ${grades.length} grades synced`, 'ok');
   } else {
-    $('done-sub').textContent = 'Offline – grades saved locally.';
+    $('done-sub').textContent = 'Offline – grades saved locally, will retry next session.';
     setSyncStatus('Offline – will sync when connected', 'fail');
   }
 }
@@ -451,7 +452,7 @@ async function pushTodayGrades() {
       const res = await fetch(`${getServerUrl()}/api/grades`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: new Date().toISOString().slice(0,10), reviews: grades }),
+        body: JSON.stringify({ date: localDate(), reviews: grades }),
       });
       if (res.ok) {
         const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
@@ -474,20 +475,43 @@ async function syncAllPending() {
   for (const k of keys) {
     const saved = JSON.parse(localStorage.getItem(k) || '{}');
     if (!saved.grades || !saved.grades.length || saved.synced) continue;
-    const date = k.replace('smgo_progress_', '');
-    try {
-      const res = await fetch(`${getServerUrl()}/api/grades`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, reviews: saved.grades }),
-      });
-      if (res.ok) {
+
+    // Try Supabase first (works anywhere)
+    const supa = getSupabase();
+    if (supa) {
+      let allOk = true;
+      for (const g of saved.grades) {
+        const ok = await supaUpsert('smgo_queue', {
+          id:      `grade-${g.elementId}-${g.timestamp}`,
+          type:    'grade',
+          payload: g,
+        });
+        if (!ok) allOk = false;
+      }
+      if (allOk) {
         localStorage.setItem(k, JSON.stringify({ ...saved, synced: true }));
         total += saved.grades.length;
+        continue;
       }
-    } catch {}
+    }
+
+    // Fallback: local server
+    if (!isStaticMode()) {
+      const date = k.replace('smgo_progress_', '');
+      try {
+        const res = await fetch(`${getServerUrl()}/api/grades`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, reviews: saved.grades }),
+        });
+        if (res.ok) {
+          localStorage.setItem(k, JSON.stringify({ ...saved, synced: true }));
+          total += saved.grades.length;
+        }
+      } catch {}
+    }
   }
-  if (total > 0) setSyncStatus(`✓ Synced ${total} pending grades from phone`, 'ok');
+  if (total > 0) setSyncStatus(`✓ Synced ${total} pending grades`, 'ok');
 }
 
 async function trySyncPending() { await syncAllPending(); }
@@ -499,12 +523,15 @@ function setSyncStatus(msg, cls) {
 // ── Extract + Items UI ─────────────────────────────────────────────────────
 let pendingExtracts = [];
 let pendingItems    = [];  // cloze + Q&A
+let pendingEdits    = [];  // text/image notes
 
 function loadExtracts() {
   try { pendingExtracts = JSON.parse(localStorage.getItem('smgo_extracts') || '[]'); }
   catch { pendingExtracts = []; }
   try { pendingItems    = JSON.parse(localStorage.getItem('smgo_items')    || '[]'); }
   catch { pendingItems  = []; }
+  try { pendingEdits    = JSON.parse(localStorage.getItem('smgo_edits')    || '[]'); }
+  catch { pendingEdits  = []; }
   updateExtractBadge();
   const ls = localStorage.getItem('smgo_last_sync');
   if (ls) {
@@ -525,9 +552,14 @@ function saveItems() {
   localStorage.setItem('smgo_items', JSON.stringify(pendingItems));
   updateExtractBadge();
 }
+function saveEdits() {
+  localStorage.setItem('smgo_edits', JSON.stringify(pendingEdits));
+  updateExtractBadge();
+}
 function updateExtractBadge() {
   const n = pendingExtracts.filter(e => !e.synced).length
-          + pendingItems.filter(i => !i.synced).length;
+          + pendingItems.filter(i => !i.synced).length
+          + pendingEdits.filter(e => !e.synced).length;
   extractCount.textContent = n;
   extractBadgeBtn.style.display = n > 0 ? 'flex' : 'none';
 }
@@ -741,7 +773,18 @@ async function callGemini(text, apiKey) {
     }
 
     const data = await res.json();
-    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+    if (!data.candidates?.length || !data.candidates[0].content?.parts?.length) {
+      lastErr = data.promptFeedback?.blockReason
+        ? `Blocked by safety filter: ${data.promptFeedback.blockReason}`
+        : 'Gemini returned no candidates.';
+      continue;
+    }
+    let raw = data.candidates[0].content.parts[0].text || '';
+    // Strip optional ```json ... ``` markdown fences Gemini sometimes adds
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let result;
+    try { result = JSON.parse(raw); }
+    catch { lastErr = `Invalid JSON from Gemini: ${raw.slice(0, 120)}`; continue; }
     localStorage.setItem('smgo_gemini_model', model); // cache for next time
     return result;
   }
@@ -800,9 +843,17 @@ async function uploadItem(item) {
   }
 }
 
+async function uploadEdit(edit) {
+  const supa = getSupabase();
+  if (!supa) return;
+  const ok = await supaUpsert('smgo_queue', { id: edit.id, type: 'edit', payload: edit });
+  if (ok) { edit.synced = true; saveEdits(); }
+}
+
 async function syncAllExtracts() {
   for (const e of pendingExtracts.filter(x => !x.synced)) await uploadExtract(e);
   for (const i of pendingItems.filter(x => !x.synced))    await uploadItem(i);
+  for (const e of pendingEdits.filter(x => !x.synced))    await uploadEdit(e);
 }
 
 function showFlash(msg) {
@@ -997,28 +1048,34 @@ async function saveEdit() {
   if (!text && !editImageData) { showFlash('Add text or paste an image first.'); return; }
 
   const rec = {
+    id:          `edit-${card.id}-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
     elementId:   card.id,
     parentTitle: card.title,
     text,
     imageData:   editImageData || null,
     timestamp:   new Date().toISOString(),
+    synced:      false,
   };
 
-  let ok = false;
-  const supa = getSupabase();
-  if (supa) {
-    ok = await supaUpsert('smgo_queue', {
-      id:      `edit-${card.id}-${rec.timestamp}`,
-      type:    'edit',
-      payload: rec,
-    });
-  }
+  // Always persist locally first so the note is never lost
+  pendingEdits.push(rec);
+  saveEdits();
 
   $('edit-modal').classList.remove('open');
-  showFlash(ok ? '✓ Note queued for SM sync' : '✓ Note saved (sync needed)');
+
+  // Attempt immediate Supabase upload
+  const supa = getSupabase();
+  if (supa) {
+    const ok = await supaUpsert('smgo_queue', { id: rec.id, type: 'edit', payload: rec });
+    if (ok) { rec.synced = true; saveEdits(); showFlash('✓ Note synced to SM'); return; }
+  }
+  showFlash('✓ Note saved — will sync later');
 }
 
-$('edit-image-area').addEventListener('paste', e => {
+// Paste handler at document level so it works on mobile (Android/iOS
+// fire paste on document, not on the focused custom element)
+document.addEventListener('paste', e => {
+  if (!$('edit-modal')?.classList.contains('open')) return;
   const items = e.clipboardData?.items;
   if (!items) return;
   for (const item of items) {

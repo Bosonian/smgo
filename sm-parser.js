@@ -40,6 +40,18 @@ function findElementFile(id) {
 }
 
 // Strip HTML tags and clean whitespace for plain text preview
+// Named HTML entities common in German medical texts
+const HTML_ENTITIES = {
+  nbsp:' ',mdash:'—',ndash:'–',lsquo:"'",rsquo:"'",ldquo:'"',rdquo:'"',
+  auml:'ä',ouml:'ö',uuml:'ü',Auml:'Ä',Ouml:'Ö',Uuml:'Ü',szlig:'ß',
+  aacute:'á',eacute:'é',iacute:'í',oacute:'ó',uacute:'ú',
+  Aacute:'Á',Eacute:'É',Iacute:'Í',Oacute:'Ó',Uacute:'Ú',
+  agrave:'à',egrave:'è',igrave:'ì',ograve:'ò',ugrave:'ù',
+  atilde:'ã',ntilde:'ñ',aelig:'æ',oelig:'œ',
+  alpha:'α',beta:'β',gamma:'γ',delta:'δ',mu:'μ',pi:'π',sigma:'σ',
+  amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",
+};
+
 function stripHtml(html) {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -48,15 +60,12 @@ function stripHtml(html) {
     .replace(/<\/p>/gi, '\n')
     .replace(/<\/div>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#8211;/g, '–')
-    .replace(/&#8212;/g, '—')
-    .replace(/&#8216;|&#8217;/g, "'")
-    .replace(/&#8220;|&#8221;/g, '"')
-    .replace(/&#[0-9]+;/g, c => String.fromCharCode(parseInt(c.slice(2, -1))))
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    // decode hex numeric entities &#xNN;
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    // decode decimal numeric entities &#NNN;
+    .replace(/&#([0-9]+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    // decode named entities
+    .replace(/&([a-z]+);/gi, (m, name) => HTML_ENTITIES[name] ?? m)
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/[ \t]+/g, ' ')
@@ -146,7 +155,7 @@ function buildCardFromHtml(id, filePath) {
   // First non-empty line as title
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const title = lines[0] ? lines[0].slice(0, 80) : `Element ${id}`;
-  return { id, type: 'topic', title, body: text.slice(0, 3000) };
+  return { id, type: 'topic', title, body: text.slice(0, 10000) };
 }
 
 // Return all outstanding cards for today — renderable types only
