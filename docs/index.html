@@ -9,6 +9,7 @@
   <title>SMGo</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="stylesheet" href="./style.css">
+  <script>(function(){var t=localStorage.getItem('smgo_theme');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
 <body>
 <div id="app">
@@ -22,6 +23,7 @@
     <button id="extract-badge-btn" style="display:none" title="Pending extracts">
       ✂ <span id="extract-count">0</span>
     </button>
+    <button id="theme-toggle" title="Toggle theme">☀️</button>
     <span id="settings-icon" title="Settings">⚙</span>
   </div>
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>

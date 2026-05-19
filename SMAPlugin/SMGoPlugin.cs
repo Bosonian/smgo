@@ -39,6 +39,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
     protected override void OnSMStarted(bool wasSMAlreadyStarted)
     {
       base.OnSMStarted(wasSMAlreadyStarted);
+      Serilog.Log.Information("SMGo OnSMStarted (wasSMAlreadyStarted={Already})", wasSMAlreadyStarted);
 
       // Give SM 2 seconds to fully settle before touching element window
       Task.Delay(2000).ContinueWith(_ =>
@@ -190,7 +191,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       {
         _cts      = new CancellationTokenSource();
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://*:{Port}/");
+        _listener.Prefixes.Add($"http://+:{Port}/");
         _listener.Start();
 
         _serverThread = new Thread(() => ServeLoop(_cts.Token))
@@ -199,10 +200,11 @@ namespace SuperMemoAssistant.Plugins.SMGo
           Name         = "SMGo-HTTP",
         };
         _serverThread.Start();
+        Serilog.Log.Information("SMGo HTTP server started on port {Port}", Port);
       }
-      catch
+      catch (Exception ex)
       {
-        // Port might be in use (Node.js still running); fail silently
+        Serilog.Log.Error(ex, "SMGo HTTP server failed to start");
       }
     }
 

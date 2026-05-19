@@ -1,5 +1,15 @@
 'use strict';
 
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = t === 'light' ? '🌙' : '☀️';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === 'light' ? '#f8fafc' : '#0f172a';
+}
+applyTheme(localStorage.getItem('smgo_theme') || 'dark');
+
 // ── Mode detection ─────────────────────────────────────────────────────────
 function isStaticMode() {
   const h = window.location.hostname;
@@ -387,6 +397,13 @@ function captureExtract() {
   pendingExtracts.push(extract);
   saveExtracts();
 
+  // Wrap the selected range in a highlight mark (matches native SM behaviour)
+  try {
+    const range = sel.getRangeAt(0);
+    const mark  = document.createElement('mark');
+    mark.className = 'extracted-mark';
+    range.surroundContents(mark);
+  } catch {}
   sel.removeAllRanges();
   hideExtractToolbar();
   showExtractFlash(text);
@@ -456,6 +473,12 @@ function renderExtractList() {
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
+$('theme-toggle').addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  localStorage.setItem('smgo_theme', next);
+  applyTheme(next);
+});
+
 $('settings-icon').addEventListener('click', () => {
   const url = prompt('SMGo server URL (e.g. http://192.168.1.10:3001)', getServerUrl());
   if (url !== null) {
