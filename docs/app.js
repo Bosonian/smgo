@@ -2052,14 +2052,12 @@ async function openLibrary() {
         const perPar   = parseInt(localStorage.getItem(`smgo_pdf_parent_${name}`) || '0', 10);
         const parLabel = perPar ? `#${perPar}` : (globalParent ? `#${globalParent}` : '–');
         html += `<div class="pdf-lib-item" data-name="${esc(name)}">
-          <div class="pdf-lib-info">
-            <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
-            <div class="pdf-lib-meta">
-              <span>${page ? `p. ${page}` : 'Not started'}</span>
-              ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
-            </div>
+          <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
+          <div class="pdf-lib-meta">
+            <span>${page ? `p. ${page}` : 'Not started'}</span>
+            ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
+            <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
           </div>
-          <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
         </div>`;
       }
     }
