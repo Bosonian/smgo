@@ -19,6 +19,7 @@
   <ItemGroup>
     <PackageReference Include="SuperMemoAssistant.Interop" Version="2.1.0-beta.26" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 
   <!-- After build: copy DLL to SMA package store -->

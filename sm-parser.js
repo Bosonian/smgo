@@ -57,6 +57,8 @@ function stripHtml(html) {
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -147,12 +149,12 @@ function buildCardFromHtml(id, filePath) {
   return { id, type: 'topic', title, body: text.slice(0, 3000) };
 }
 
-// Return all outstanding cards for today — text-renderable types only
+// Return all outstanding cards for today — renderable types only
 function getTodayCards() {
   const ids = getOutstandingIds();
   return ids.map(buildCard).filter(c =>
-    c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'cloze'
+    c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'cloze' || c.type === 'image'
   );
 }
 
-module.exports = { getTodayCards, getOutstandingIds, COLLECTION };
+module.exports = { getTodayCards, getOutstandingIds, findElementFile, COLLECTION };

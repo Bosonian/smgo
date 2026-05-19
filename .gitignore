@@ -8,3 +8,4 @@ SMAPlugin/bin/
 SMAPlugin/obj/
 pwa/
 *.applied.json
+config.json

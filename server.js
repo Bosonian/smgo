@@ -3,7 +3,7 @@ const http  = require('http');
 const fs    = require('fs');
 const path  = require('path');
 const os    = require('os');
-const { getTodayCards } = require('./sm-parser');
+const { getTodayCards, findElementFile } = require('./sm-parser');
 
 const PORT        = 3001;
 const PWA_DIR     = path.join(__dirname, 'docs');
@@ -19,6 +19,10 @@ const MIME = {
   '.css':  'text/css',
   '.json': 'application/json',
   '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.bmp':  'image/bmp',
   '.ico':  'image/x-icon',
   '.webmanifest': 'application/manifest+json',
 };
@@ -133,6 +137,20 @@ const server = http.createServer(async (req, res) => {
       catch {}
     }
     sendJson(res, all);
+    return;
+  }
+
+  // GET /api/images/:id — serve element image file directly from SM collection
+  const imgMatch = /^\/api\/images\/(\d+)$/.exec(url);
+  if (imgMatch && req.method === 'GET') {
+    const filePath = findElementFile(parseInt(imgMatch[1]));
+    if (!filePath || !/\.(png|jpe?g|gif|bmp)$/i.test(filePath)) {
+      send(res, 404, 'text/plain', '404'); return;
+    }
+    const ext  = path.extname(filePath).toLowerCase();
+    const mime = MIME[ext] || 'image/png';
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'max-age=3600', 'Access-Control-Allow-Origin': '*' });
+    fs.createReadStream(filePath).pipe(res);
     return;
   }
 

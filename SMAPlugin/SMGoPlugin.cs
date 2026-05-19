@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -37,12 +38,20 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private FileSystemWatcher? _dismissesWatcher;
     private Timer? _applyDebounce;
 
+    // Supabase cloud sync
+    private static readonly HttpClient _http = new HttpClient();
+    private string? _supaUrl;
+    private string? _supaKey;
+    private Timer?  _supaTimer;
+
     // ── SMA lifecycle ─────────────────────────────────────────────────────
 
     protected override void OnSMStarted(bool wasSMAlreadyStarted)
     {
       base.OnSMStarted(wasSMAlreadyStarted);
       Serilog.Log.Information("SMGo OnSMStarted (wasSMAlreadyStarted={Already})", wasSMAlreadyStarted);
+
+      LoadConfig();
 
       // Give SM 2 seconds to fully settle before touching element window
       Task.Delay(2000).ContinueWith(_ =>
@@ -55,6 +64,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
       StartHttpServer();
       StartFileWatchers();
+      StartSupabasePoller();
     }
 
     protected override void OnSMStopped()
@@ -62,6 +72,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       base.OnSMStopped();
       StopHttpServer();
       StopFileWatchers();
+      StopSupabasePoller();
     }
 
     protected override void Dispose(bool disposing)
@@ -70,9 +81,160 @@ namespace SuperMemoAssistant.Plugins.SMGo
       {
         StopHttpServer();
         StopFileWatchers();
+        StopSupabasePoller();
         _applyDebounce?.Dispose();
       }
       base.Dispose(disposing);
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
+
+    private void LoadConfig()
+    {
+      var configFile = Path.Combine(DataDir, "config.json");
+      if (!File.Exists(configFile)) return;
+      try
+      {
+        var cfg = JObject.Parse(File.ReadAllText(configFile));
+        _supaUrl = cfg["supabaseUrl"]?.ToString()?.TrimEnd('/');
+        _supaKey = cfg["supabaseKey"]?.ToString();
+        if (!string.IsNullOrEmpty(_supaUrl) && !string.IsNullOrEmpty(_supaKey))
+          Serilog.Log.Information("SMGo Supabase sync enabled: {Url}", _supaUrl);
+      }
+      catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo failed to load config.json"); }
+    }
+
+    // ── Supabase poller ───────────────────────────────────────────────────────
+
+    private void StartSupabasePoller()
+    {
+      if (string.IsNullOrEmpty(_supaUrl) || string.IsNullOrEmpty(_supaKey)) return;
+      // Poll after 15s on start, then every 30s
+      _supaTimer = new Timer(_ => Task.Run(PollSupabaseAsync), null,
+        TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30));
+    }
+
+    private void StopSupabasePoller()
+    {
+      _supaTimer?.Dispose();
+      _supaTimer = null;
+    }
+
+    private async Task PollSupabaseAsync()
+    {
+      if (string.IsNullOrEmpty(_supaUrl) || string.IsNullOrEmpty(_supaKey)) return;
+      try
+      {
+        var req = new HttpRequestMessage(HttpMethod.Get,
+          $"{_supaUrl}/rest/v1/smgo_queue?applied=eq.false&order=created_at.asc");
+        req.Headers.Add("apikey", _supaKey);
+        req.Headers.Add("Authorization", $"Bearer {_supaKey}");
+
+        var resp = await _http.SendAsync(req);
+        if (!resp.IsSuccessStatusCode) return;
+
+        var items = JArray.Parse(await resp.Content.ReadAsStringAsync());
+        if (items.Count == 0) return;
+
+        Serilog.Log.Information("SMGo Supabase: {Count} items to apply", items.Count);
+
+        foreach (JObject item in items)
+        {
+          var id      = item["id"]?.ToString() ?? "";
+          var type    = item["type"]?.ToString() ?? "";
+          var payload = item["payload"] as JObject;
+          if (payload == null || string.IsNullOrEmpty(id)) continue;
+
+          bool applied = false;
+          try
+          {
+            switch (type)
+            {
+              case "extract": applied = ApplyOneExtract(payload);  break;
+              case "qa":      applied = ApplyOneQA(payload);       break;
+              case "cloze":   applied = ApplyOneCloze(payload);    break;
+              case "grade":   applied = ApplyOneGrade(payload);    break;
+            }
+          }
+          catch (Exception ex)
+          {
+            Serilog.Log.Warning(ex, "SMGo Supabase: failed to apply item {Id}", id);
+          }
+
+          if (applied) await MarkSupabaseApplied(id);
+          Thread.Sleep(400);
+        }
+      }
+      catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo Supabase poll error"); }
+    }
+
+    private async Task MarkSupabaseApplied(string id)
+    {
+      try
+      {
+        var patch = new HttpRequestMessage(new HttpMethod("PATCH"),
+          $"{_supaUrl}/rest/v1/smgo_queue?id=eq.{Uri.EscapeDataString(id)}");
+        patch.Headers.Add("apikey", _supaKey);
+        patch.Headers.Add("Authorization", $"Bearer {_supaKey}");
+        patch.Headers.Add("Prefer", "return=minimal");
+        patch.Content = new StringContent("{\"applied\":true}", Encoding.UTF8, "application/json");
+        await _http.SendAsync(patch);
+      }
+      catch { }
+    }
+
+    // ── Single-item apply helpers (shared between file-based and Supabase) ───
+
+    private bool ApplyOneExtract(JObject p)
+    {
+      var text     = p["text"]?.ToString() ?? "";
+      var parentId = p["parentId"]?.Value<int>() ?? 0;
+      if (string.IsNullOrEmpty(text)) return false;
+      var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      return true;
+    }
+
+    private bool ApplyOneQA(JObject p)
+    {
+      var question = p["question"]?.ToString() ?? "";
+      var answer   = p["answer"]?.ToString() ?? "";
+      var parentId = p["parentId"]?.Value<int>() ?? 0;
+      if (string.IsNullOrWhiteSpace(question)) return false;
+      var qHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(question)}</span>";
+      var aHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(answer)}</span>";
+      var builder = new ElementBuilder(ElementType.Item,
+        new TextContent(true, qHtml), new TextContent(true, aHtml))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      return true;
+    }
+
+    private bool ApplyOneCloze(JObject p)
+    {
+      var sentence = p["sentence"]?.ToString() ?? "";
+      var parentId = p["parentId"]?.Value<int>() ?? 0;
+      if (string.IsNullOrWhiteSpace(sentence)) return false;
+      var blanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
+        _ => "<span style=\"color:blue\">[...]</span>");
+      var html    = $"<span style=\"color:#231F20\">{blanked}</span>";
+      var builder = new ElementBuilder(ElementType.Item, new TextContent(true, html))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      return true;
+    }
+
+    private bool ApplyOneGrade(JObject p)
+    {
+      var elementId = p["elementId"]?.Value<int>() ?? 0;
+      var grade     = p["grade"]?.Value<int>() ?? -1;
+      if (elementId <= 0 || grade < 0 || grade > 5) return false;
+      Svc.SM.UI.ElementWdw.GoToElement(elementId);
+      Thread.Sleep(400);
+      Svc.SM.UI.ElementWdw.AssignGrade(grade);
+      return true;
     }
 
     // ── FileSystemWatcher ─────────────────────────────────────────────────
@@ -133,120 +295,75 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private void OnItemFileChanged(object sender, FileSystemEventArgs e)    => Debounce(ApplyPendingItems);
     private void OnDismissFileChanged(object sender, FileSystemEventArgs e) => Debounce(ApplyPendingDismisses);
 
-    // ── Grade application ─────────────────────────────────────────────────
+    // ── File-based apply (local server fallback) ──────────────────────────
 
     private void ApplyPendingGrades()
     {
-      var gradesDir = Path.Combine(DataDir, "grades");
-      if (!Directory.Exists(gradesDir)) return;
-
-      foreach (var file in Directory.GetFiles(gradesDir, "*.json"))
+      var dir = Path.Combine(DataDir, "grades");
+      if (!Directory.Exists(dir)) return;
+      foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
         try
         {
           var reviews = JsonConvert.DeserializeObject<List<GradeRecord>>(File.ReadAllText(file));
           if (reviews == null || reviews.Count == 0) continue;
-
           foreach (var r in reviews)
           {
-            if (r.Grade < 0 || r.Grade > 5) continue;
-            Svc.SM.UI.ElementWdw.GoToElement(r.ElementId);
-            Thread.Sleep(400);
-            Svc.SM.UI.ElementWdw.AssignGrade(r.Grade);
+            var p = new JObject { ["elementId"] = r.ElementId, ["grade"] = r.Grade };
+            ApplyOneGrade(p);
             Thread.Sleep(200);
           }
-
-          var dest = file.Replace(".json", ".applied.json");
-          if (File.Exists(dest)) File.Delete(dest);
-          File.Move(file, dest);
+          MarkFileApplied(file);
         }
         catch { }
       }
     }
 
-    // ── Extract application ───────────────────────────────────────────────
-
     private void ApplyPendingExtracts()
     {
-      var extractDir = Path.Combine(DataDir, "extracts");
-      if (!Directory.Exists(extractDir)) return;
-
-      foreach (var file in Directory.GetFiles(extractDir, "*.json"))
+      var dir = Path.Combine(DataDir, "extracts");
+      if (!Directory.Exists(dir)) return;
+      foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
         try
         {
           var extracts = JsonConvert.DeserializeObject<List<ExtractRecord>>(File.ReadAllText(file));
           if (extracts == null || extracts.Count == 0) continue;
-
           foreach (var e in extracts)
           {
-            var html = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(e.Text)}</span>\n<span />";
-            var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
-              .WithParent(e.ParentId)
-              .DoNotDisplay();
-
-            Svc.SM.Registry.Element.Add(
-              out _,
-              ElemCreationFlags.CreateSubfolders,
-              builder);
-
+            var p = new JObject { ["text"] = e.Text, ["parentId"] = e.ParentId };
+            ApplyOneExtract(p);
             Thread.Sleep(300);
           }
-
-          var dest = file.Replace(".json", ".applied.json");
-          if (File.Exists(dest)) File.Delete(dest);
-          File.Move(file, dest);
+          MarkFileApplied(file);
         }
         catch { }
       }
     }
 
-    // ── Item application (cloze + Q&A) ───────────────────────────────────
-
     private void ApplyPendingItems()
     {
-      var itemsDir = Path.Combine(DataDir, "items");
-      if (!Directory.Exists(itemsDir)) return;
-
-      foreach (var file in Directory.GetFiles(itemsDir, "*.json"))
+      var dir = Path.Combine(DataDir, "items");
+      if (!Directory.Exists(dir)) return;
+      foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
         try
         {
           var items = JsonConvert.DeserializeObject<List<ItemRecord>>(File.ReadAllText(file));
           if (items == null || items.Count == 0) continue;
-
           foreach (var item in items)
           {
-            ElementBuilder? builder = null;
-
-            if (item.Type == "qa" && !string.IsNullOrWhiteSpace(item.Question))
+            var p = new JObject
             {
-              var qHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(item.Question)}</span>";
-              var aHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(item.Answer)}</span>";
-              builder = new ElementBuilder(ElementType.Item,
-                new TextContent(true, qHtml),
-                new TextContent(true, aHtml))
-                .WithParent(item.ParentId).DoNotDisplay();
-            }
-            else if (item.Type == "cloze" && !string.IsNullOrWhiteSpace(item.Sentence))
-            {
-              // [word] → SM cloze blank
-              var blanked = Regex.Replace(item.Sentence, @"\[([^\]]+)\]",
-                m => $"<span style=\"color:blue\">[...]</span>");
-              var html = $"<span style=\"color:#231F20\">{blanked}</span>";
-              builder = new ElementBuilder(ElementType.Item, new TextContent(true, html))
-                .WithParent(item.ParentId).DoNotDisplay();
-            }
-
-            if (builder == null) continue;
-
-            Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+              ["type"] = item.Type, ["parentId"] = item.ParentId,
+              ["question"] = item.Question, ["answer"] = item.Answer,
+              ["sentence"] = item.Sentence,
+            };
+            if (item.Type == "qa")    ApplyOneQA(p);
+            if (item.Type == "cloze") ApplyOneCloze(p);
             Thread.Sleep(300);
           }
-
-          var dest = file.Replace(".json", ".applied.json");
-          if (File.Exists(dest)) File.Delete(dest);
-          File.Move(file, dest);
+          MarkFileApplied(file);
         }
         catch { }
       }
@@ -280,6 +397,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
         }
         catch { }
       }
+    }
+
+    private static void MarkFileApplied(string file)
+    {
+      var dest = file.Replace(".json", ".applied.json");
+      if (File.Exists(dest)) File.Delete(dest);
+      File.Move(file, dest);
     }
 
     // ── HTTP server ───────────────────────────────────────────────────────

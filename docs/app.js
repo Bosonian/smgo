@@ -12,6 +12,7 @@ applyTheme(localStorage.getItem('smgo_theme') || 'dark');
 
 // ── Mode detection ─────────────────────────────────────────────────────────
 function isStaticMode() {
+  if (localStorage.getItem('smgo_server')) return false; // explicit server overrides origin check
   const h = window.location.hostname;
   if (h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0') return false;
   if (/^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(h)) return false;
@@ -19,6 +20,30 @@ function isStaticMode() {
 }
 function getServerUrl() {
   return localStorage.getItem('smgo_server') || window.location.origin;
+}
+
+// ── Supabase cloud sync ────────────────────────────────────────────────────
+function getSupabase() {
+  const url = localStorage.getItem('smgo_supa_url') || '';
+  const key = localStorage.getItem('smgo_supa_key') || '';
+  return (url && key) ? { url: url.replace(/\/$/, ''), key } : null;
+}
+
+async function supaUpsert(table, row) {
+  const supa = getSupabase();
+  if (!supa) return false;
+  try {
+    const res = await fetch(`${supa.url}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        apikey: supa.key, Authorization: `Bearer ${supa.key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(row),
+    });
+    return res.ok;
+  } catch { return false; }
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -185,7 +210,7 @@ function renderCard() {
   progressBar.style.width  = `${(idx / total) * 100}%`;
   progressText.textContent = `${idx} / ${total}`;
 
-  const typeLabel  = { topic: 'Topic', 'pdf-extract': 'PDF Extract', cloze: 'Cloze' };
+  const typeLabel  = { topic: 'Topic', 'pdf-extract': 'PDF Extract', cloze: 'Cloze', image: 'Image' };
   const badgeClass = 'badge-' + (c.type || 'topic');
 
   let bodyHtml = '';
@@ -194,9 +219,15 @@ function renderCard() {
     const blanked = c.clozeSentence.replace(/\[___\]/g,
       () => `<span class="cloze-blank" data-bi="${n++}">[___]</span>`);
     bodyHtml = `<div class="cloze-sentence">${blanked}</div>`;
-    if (c.body) bodyHtml += `<div class="card-body selectable">${esc(c.body)}</div>`;
+    if (c.body) bodyHtml += `<div class="card-body selectable">${formatBody(c.body)}</div>`;
+  } else if (c.type === 'image') {
+    if (!isStaticMode()) {
+      bodyHtml = `<div class="card-body"><img src="${getServerUrl()}/api/images/${c.id}" class="card-image" alt="Element ${c.id}" loading="lazy"></div>`;
+    } else {
+      bodyHtml = `<div class="card-body" style="color:var(--muted)">Image – only available on home network.</div>`;
+    }
   } else if (c.body) {
-    bodyHtml = `<div class="card-body selectable">${esc(c.body)}</div>`;
+    bodyHtml = `<div class="card-body selectable">${formatBody(c.body)}</div>`;
   } else {
     bodyHtml = `<div class="card-body" style="color:var(--muted)">No renderable content.</div>`;
   }
@@ -211,7 +242,7 @@ function renderCard() {
   revealBtn.style.display = 'block';
   gradeRow.style.display  = 'none';
 
-  const isDismissable = c.type === 'topic' || c.type === 'pdf-extract';
+  const isDismissable = c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'image';
   $('dismiss-btn').style.display = isDismissable ? 'inline-flex' : 'none';
 
   if (c.type === 'cloze') {
@@ -255,6 +286,45 @@ function showGrades() {
 function esc(s) {
   if (!s) return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Text normalization ─────────────────────────────────────────────────────
+// SM stores each PDF visual line as a separate paragraph block separated by
+// \r\n\n. This heuristic rejoins soft-wrapped lines into proper paragraphs.
+function normalizeBody(text) {
+  if (!text) return [];
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = text.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+  if (!blocks.length) return [];
+  let current = blocks[0];
+  const paragraphs = [];
+  for (let i = 1; i < blocks.length; i++) {
+    const next = blocks[i];
+    // Hyphenated word split across lines
+    if (current.slice(-1) === '-' || current.slice(-1) === '‐') {
+      current = current.slice(0, -1) + next;
+      continue;
+    }
+    // Soft wrap: no sentence-ending punct and next starts with lowercase/digit/paren
+    const softWrap = !/[.!?:;"'’”]$/.test(current) && /^[a-z0-9(]/.test(next);
+    if (softWrap) {
+      current = current + ' ' + next;
+    } else {
+      paragraphs.push(current);
+      current = next;
+    }
+  }
+  paragraphs.push(current);
+  return paragraphs;
+}
+
+function formatBody(text) {
+  if (!text) return '';
+  return normalizeBody(text).map(para => {
+    const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return '';
+    return `<p>${lines.map(esc).join('<br>')}</p>`;
+  }).filter(Boolean).join('');
 }
 
 // ── Grading ────────────────────────────────────────────────────────────────
@@ -564,23 +634,37 @@ function saveQA() {
 
 // ── Upload / sync ──────────────────────────────────────────────────────────
 async function uploadExtract(extract) {
-  try {
-    const res = await fetch(`${getServerUrl()}/api/extracts`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(extract),
-    });
-    if (res.ok) { extract.synced = true; saveExtracts(); }
-  } catch {}
+  // Try Supabase first (works from anywhere)
+  if (await supaUpsert('smgo_queue', { id: extract.id, type: 'extract', payload: extract })) {
+    extract.synced = true; saveExtracts(); return;
+  }
+  // Fallback: local server (same-network only)
+  if (!isStaticMode()) {
+    try {
+      const res = await fetch(`${getServerUrl()}/api/extracts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(extract),
+      });
+      if (res.ok) { extract.synced = true; saveExtracts(); }
+    } catch {}
+  }
 }
 
 async function uploadItem(item) {
-  try {
-    const res = await fetch(`${getServerUrl()}/api/items`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item),
-    });
-    if (res.ok) { item.synced = true; saveItems(); }
-  } catch {}
+  // Try Supabase first
+  if (await supaUpsert('smgo_queue', { id: item.id, type: item.type, payload: item })) {
+    item.synced = true; saveItems(); return;
+  }
+  // Fallback: local server
+  if (!isStaticMode()) {
+    try {
+      const res = await fetch(`${getServerUrl()}/api/items`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
+      if (res.ok) { item.synced = true; saveItems(); }
+    } catch {}
+  }
 }
 
 async function syncAllExtracts() {
@@ -648,10 +732,10 @@ $('theme-toggle').addEventListener('click', () => {
 
 $('settings-icon').addEventListener('click', () => {
   const choice = prompt(
-    'Settings\n\n1) Server URL\n2) Gemini API key\n\nEnter 1 or 2:',
+    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n\nEnter number:',
   );
   if (choice === '1') {
-    const url = prompt('SMGo server URL', getServerUrl());
+    const url = prompt('SMGo server URL (e.g. http://192.168.1.x:3001)', getServerUrl());
     if (url !== null) {
       if (url.trim()) localStorage.setItem('smgo_server', url.trim());
       else localStorage.removeItem('smgo_server');
@@ -662,6 +746,18 @@ $('settings-icon').addEventListener('click', () => {
     if (key !== null) {
       if (key.trim()) localStorage.setItem('smgo_gemini_key', key.trim());
       else localStorage.removeItem('smgo_gemini_key');
+    }
+  } else if (choice === '3') {
+    const url = prompt('Supabase project URL\n(e.g. https://abcxyz.supabase.co)', localStorage.getItem('smgo_supa_url') || '');
+    if (url !== null) {
+      if (url.trim()) localStorage.setItem('smgo_supa_url', url.trim());
+      else localStorage.removeItem('smgo_supa_url');
+    }
+  } else if (choice === '4') {
+    const key = prompt('Supabase anon key (from Project Settings → API):', localStorage.getItem('smgo_supa_key') || '');
+    if (key !== null) {
+      if (key.trim()) localStorage.setItem('smgo_supa_key', key.trim());
+      else localStorage.removeItem('smgo_supa_key');
     }
   }
 });
@@ -705,7 +801,10 @@ $('extract-clear-btn').addEventListener('click', () => {
   }
 });
 $('extract-sync-btn').addEventListener('click', async () => {
-  if (isStaticMode()) { alert('Sync only available on home network.'); return; }
+  if (!getSupabase() && isStaticMode()) {
+    alert('No sync route available.\n\nOptions:\n• Set server URL in ⚙ (same WiFi)\n• Configure Supabase in ⚙ (anywhere)');
+    return;
+  }
   await syncAllExtracts();
   renderExtractList();
   const n = pendingExtracts.filter(e=>e.synced).length + pendingItems.filter(i=>i.synced).length;
