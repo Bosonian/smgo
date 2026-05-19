@@ -679,11 +679,12 @@ async function callGemini(text, apiKey) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 5000));
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    if (res.status === 429) {
-      if (attempt < 2) continue; // retry after delay
-      throw new Error('Gemini rate limit reached — wait a minute and try again.');
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const e = await res.json(); msg = e?.error?.message || e?.message || msg; } catch {}
+      if (res.status === 429 && attempt < 2) continue;
+      throw new Error(msg);
     }
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
     const data = await res.json();
     return JSON.parse(data.candidates[0].content.parts[0].text);
   }
