@@ -85,6 +85,25 @@ function parseCloze(html) {
   return { clozeSentence: stripHtml(blank) };
 }
 
+// Find the parent .pdf file for a pdf-extract element.
+// SM creates the parent PDF element first (ID=N), then child extracts (N+1, N+2…)
+// in the same elements subdirectory. Walk backwards from id-1 to find the nearest .pdf.
+function findParentPdfFile(extractId) {
+  const dir = Math.floor((extractId - 1) / 10);
+  const pdfExts = ['.pdf', '.PDF'];
+  for (let candidate = extractId - 1; candidate >= 1; candidate--) {
+    const cDir = Math.floor((candidate - 1) / 10);
+    if (cDir !== dir) break; // left the directory — stop
+    for (const ext of pdfExts) {
+      const p = cDir > 0
+        ? path.join(ELEM_DIR, String(cDir), `${candidate}${ext}`)
+        : path.join(ELEM_DIR, `${candidate}${ext}`);
+      if (fs.existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
 // Decode the base64 JSON embedded in PDF-reference elements
 function parsePdfElement(html) {
   const titleRe    = /id=pdf-element-title[^>]*>(.*?)</i;
@@ -138,11 +157,20 @@ function buildCardFromHtml(id, filePath) {
   // Is this a PDF-reference wrapper?
   if (html.includes('id=pdf-element-filename')) {
     const { title, filename, page } = parsePdfElement(html);
-    const pageStr = page != null ? `Page ${page}` : '';
-    const body = [title, pageStr, filename ? `PDF: ${filename}` : '']
-                   .filter(Boolean).join('\n');
+    const pdfFile = findParentPdfFile(id);
+    // Parent element ID is encoded in its filename: .../50/500.pdf → 500
+    let pdfElementId = null;
+    if (pdfFile) {
+      const base = path.basename(pdfFile, path.extname(pdfFile));
+      pdfElementId = parseInt(base, 10) || null;
+    }
     return { id, type: 'pdf-extract',
-             title: title || `Element ${id}`, body, pdfPage: page };
+             title: title || `Element ${id}`,
+             body: null,          // filled in by export-cloud.js after text extraction
+             pdfPage: page,       // 0-indexed page number
+             pdfFile,             // absolute server path (stripped before Supabase push)
+             pdfFilename: filename,
+             pdfElementId };      // parent PDF root element ID for creating new extracts
   }
 
   const cloze = parseCloze(html);
@@ -166,4 +194,4 @@ function getTodayCards() {
   );
 }
 
-module.exports = { getTodayCards, getOutstandingIds, findElementFile, COLLECTION };
+module.exports = { getTodayCards, getOutstandingIds, findElementFile, findParentPdfFile, COLLECTION };

@@ -183,12 +183,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
           {
             switch (type)
             {
-              case "extract": applied = ApplyOneExtract(payload);  break;
-              case "qa":      applied = ApplyOneQA(payload);       break;
-              case "cloze":   applied = ApplyOneCloze(payload);    break;
-              case "grade":   applied = ApplyOneGrade(payload);    break;
-              case "dismiss": applied = ApplyOneDismiss(payload);  break;
-              case "edit":    applied = ApplyOneEdit(payload);     break;
+              case "extract":             applied = ApplyOneExtract(payload);          break;
+              case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload);      break;
+              case "qa":                  applied = ApplyOneQA(payload);              break;
+              case "cloze":               applied = ApplyOneCloze(payload);           break;
+              case "grade":               applied = ApplyOneGrade(payload);           break;
+              case "dismiss":             applied = ApplyOneDismiss(payload);         break;
+              case "edit":                applied = ApplyOneEdit(payload);            break;
             }
           }
           catch (Exception ex)
@@ -256,6 +257,19 @@ namespace SuperMemoAssistant.Plugins.SMGo
         _ => "<span style=\"color:blue\">[...]</span>");
       var html    = $"<span style=\"color:#231F20\">{blanked}</span>";
       var builder = new ElementBuilder(ElementType.Item, new TextContent(true, html))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      return true;
+    }
+
+    // Creates a new extract Topic as a child of the PDF root element (not the pdf-extract child)
+    private bool ApplyOnePdfExtract(JObject p)
+    {
+      var text     = p["text"]?.ToString() ?? "";
+      var parentId = p["parentId"]?.Value<int>() ?? 0;
+      if (string.IsNullOrEmpty(text) || parentId <= 0) return false;
+      var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
       return true;
@@ -585,6 +599,15 @@ namespace SuperMemoAssistant.Plugins.SMGo
           return;
         }
 
+        // Serve a PDF file for a given extract element ID (LAN only)
+        if (url.StartsWith("/api/pdf/") && req.HttpMethod == "GET")
+        {
+          if (int.TryParse(url.Substring("/api/pdf/".Length), out int pdfElemId))
+            ServePdf(pdfElemId, res);
+          else { res.StatusCode = 400; res.Close(); }
+          return;
+        }
+
         // Apply pending immediately (called by PWA on server wake)
         if (url == "/api/apply" && req.HttpMethod == "POST")
         {
@@ -731,6 +754,51 @@ namespace SuperMemoAssistant.Plugins.SMGo
           }
           catch { }
       SendRaw(res, 200, "application/json", result.ToString());
+    }
+
+    // ── PDF serving (LAN fallback) ────────────────────────────────────────
+
+    private const string CollectionElemDir = @"C:\SuperMemo\systems\Facharzt\elements";
+
+    // Find the parent .pdf file for a pdf-extract element.
+    // SM creates the parent PDF element first (ID=N), then children (N+1, N+2...) in the same dir bucket.
+    private static string? FindParentPdfPath(int extractId)
+    {
+      int dir = (extractId - 1) / 10;
+      for (int candidate = extractId - 1; candidate >= 1; candidate--)
+      {
+        int cDir = (candidate - 1) / 10;
+        if (cDir != dir) break;
+        string folder = cDir > 0
+          ? Path.Combine(CollectionElemDir, cDir.ToString())
+          : CollectionElemDir;
+        foreach (var ext in new[] { ".pdf", ".PDF" })
+        {
+          var p = Path.Combine(folder, candidate + ext);
+          if (File.Exists(p)) return p;
+        }
+      }
+      return null;
+    }
+
+    private void ServePdf(int extractId, HttpListenerResponse res)
+    {
+      var pdfPath = FindParentPdfPath(extractId);
+      if (pdfPath == null || !File.Exists(pdfPath))
+      {
+        res.StatusCode = 404; res.Close(); return;
+      }
+      try
+      {
+        using var fs = File.OpenRead(pdfPath);
+        res.StatusCode      = 200;
+        res.ContentType     = "application/pdf";
+        res.ContentLength64 = fs.Length;
+        res.Headers["Access-Control-Allow-Origin"] = "*";
+        fs.CopyTo(res.OutputStream);
+        res.Close();
+      }
+      catch { try { res.StatusCode = 500; res.Close(); } catch { } }
     }
 
     private void ServeStatic(HttpListenerRequest req, HttpListenerResponse res)

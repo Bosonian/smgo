@@ -6,6 +6,12 @@ const path = require('path');
 const https = require('https');
 const { getTodayCards } = require('./sm-parser');
 
+let pdfjsLib;
+try {
+  pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = ''; // disable worker in Node.js
+} catch { pdfjsLib = null; }
+
 let config;
 try { config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf-8')); }
 catch { console.error('SMGo: config.json not found'); process.exit(0); }
@@ -22,9 +28,9 @@ const headers = {
   'Content-Type':  'application/json',
 };
 
-function supaRequest(path, method, body, extraHeaders = {}) {
+function supaRequest(reqPath, method, body, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    const url  = new URL(base + path);
+    const url  = new URL(base + reqPath);
     const data = body ? JSON.stringify(body) : '';
     const opts = {
       hostname: url.hostname,
@@ -43,6 +49,50 @@ function supaRequest(path, method, body, extraHeaders = {}) {
   });
 }
 
+// Extract text from a specific page of a PDF file (0-indexed page number).
+// Groups cards by PDF file so each file is opened only once.
+async function enrichPdfCards(cards) {
+  if (!pdfjsLib) return;
+  const pdfCards = cards.filter(c => c.type === 'pdf-extract' && c.pdfFile && c.pdfPage != null);
+  if (!pdfCards.length) return;
+
+  // Group by PDF path
+  const groups = {};
+  for (const card of pdfCards) {
+    if (!groups[card.pdfFile]) groups[card.pdfFile] = [];
+    groups[card.pdfFile].push(card);
+  }
+
+  for (const [pdfPath, group] of Object.entries(groups)) {
+    if (!fs.existsSync(pdfPath)) {
+      console.warn(`SMGo: PDF not found: ${pdfPath}`);
+      continue;
+    }
+    let doc;
+    try {
+      const data = new Uint8Array(fs.readFileSync(pdfPath));
+      doc = await pdfjsLib.getDocument({ data, verbosity: 0 }).promise;
+    } catch (e) {
+      console.warn(`SMGo: could not open PDF ${path.basename(pdfPath)}: ${e.message}`);
+      continue;
+    }
+    for (const card of group) {
+      try {
+        // pdfPage is 0-indexed; PDF.js getPage() is 1-indexed; null → default page 1
+        const pageNum = Math.max(1, Math.min((card.pdfPage ?? 0) + 1, doc.numPages));
+        const page    = await doc.getPage(pageNum);
+        const content = await page.getTextContent();
+        card.body = content.items
+          .map(i => i.str || '')
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 8000);
+      } catch {}
+    }
+  }
+}
+
 (async () => {
   // Ensure tables exist (idempotent — safe to call every time)
   const setup = await supaRequest('/rest/v1/rpc/smgo_setup', 'POST', {});
@@ -51,15 +101,27 @@ function supaRequest(path, method, body, extraHeaders = {}) {
     // Non-fatal — tables may already exist
   }
 
-  const _d = new Date();
+  const _d  = new Date();
   const date = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
-  const cards   = getTodayCards();
-  const payload = { date, count: cards.length, cards, generated: new Date().toISOString() };
+  const cards = getTodayCards();
+
+  // Fill in PDF page text (requires pdfjs-dist and local PDF files)
+  await enrichPdfCards(cards);
+
+  // Strip server-side pdfFile path before sending — it's meaningless to the PWA
+  const cleanCards = cards.map(c => {
+    if (c.type !== 'pdf-extract') return c;
+    const { pdfFile, ...rest } = c;
+    return rest;
+  });
+
+  const payload = { date, count: cleanCards.length, cards: cleanCards, generated: new Date().toISOString() };
 
   const push = await supaRequest(
     '/rest/v1/smgo_daily', 'POST',
     { date, data: payload },
     { 'Prefer': 'resolution=merge-duplicates' }
   );
-  console.log(`SMGo: pushed ${cards.length} cards to Supabase (HTTP ${push.status})`);
+  const pdfCount = cleanCards.filter(c => c.type === 'pdf-extract' && c.body).length;
+  console.log(`SMGo: pushed ${cleanCards.length} cards to Supabase (${pdfCount} PDF extracts with text) HTTP ${push.status}`);
 })().catch(e => console.error('SMGo export-cloud error:', e.message));

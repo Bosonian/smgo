@@ -108,6 +108,7 @@
     <div id="grade-row"></div>
     <div id="card-meta-row">
       <button id="skip-btn" class="secondary-btn">Skip →</button>
+      <button id="pdf-open-btn" class="secondary-btn" style="display:none">📄 PDF</button>
       <button id="edit-btn" class="secondary-btn" style="display:none">✏ Note</button>
       <button id="dismiss-btn" class="secondary-btn dismiss-btn" style="display:none">Dismiss</button>
     </div>
@@ -171,6 +172,35 @@
       <div class="modal-footer">
         <button id="qa-cancel-btn" class="secondary-btn">Cancel</button>
         <button id="qa-save-btn" class="primary-btn">Save Q&amp;A</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF viewer modal (full-screen) -->
+  <div id="pdf-modal" class="modal pdf-modal">
+    <div class="pdf-modal-inner">
+      <div id="pdf-modal-header">
+        <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
+        <span id="pdf-page-info">–</span>
+        <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
+        <span id="pdf-title-label"></span>
+        <button id="pdf-close-btn" class="pdf-nav-btn" title="Close">✕</button>
+      </div>
+      <div id="pdf-viewport">
+        <div id="pdf-loading-msg">Loading PDF…</div>
+        <div id="pdf-error-msg" style="display:none"></div>
+        <div id="pdf-canvas-wrap">
+          <canvas id="pdf-canvas"></canvas>
+          <div id="pdf-text-layer" class="textLayer"></div>
+        </div>
+      </div>
+      <div id="pdf-action-bar">
+        <span id="pdf-sel-label" style="display:none">Text selected</span>
+        <button id="pdf-extract-btn" class="primary-btn" style="display:none">✂ Extract to SM</button>
+        <div id="pdf-no-folder-msg" style="display:none">
+          <span>No PDF folder set.</span>
+          <button id="pdf-set-folder-btn" class="secondary-btn">Select folder</button>
+        </div>
       </div>
     </div>
   </div>

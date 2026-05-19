@@ -288,8 +288,9 @@ function renderCard() {
   gradeRow.style.display  = 'none';
 
   const isDismissable = c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'image';
-  $('dismiss-btn').style.display = isDismissable ? 'inline-flex' : 'none';
-  $('edit-btn').style.display = (getSupabase() || !isStaticMode()) ? 'inline-flex' : 'none';
+  $('dismiss-btn').style.display  = isDismissable ? 'inline-flex' : 'none';
+  $('edit-btn').style.display     = (getSupabase() || !isStaticMode()) ? 'inline-flex' : 'none';
+  $('pdf-open-btn').style.display = c.type === 'pdf-extract' ? 'inline-flex' : 'none';
 
   if (c.type === 'cloze') {
     revealBtn.textContent = 'Reveal Answer';
@@ -822,8 +823,9 @@ function saveQA() {
 
 // ── Upload / sync ──────────────────────────────────────────────────────────
 async function uploadExtract(extract) {
+  const qType = extract.type || 'extract'; // 'extract' or 'pdf-extract-create'
   // Try Supabase first (works from anywhere)
-  if (await supaUpsert('smgo_queue', { id: extract.id, type: 'extract', payload: extract })) {
+  if (await supaUpsert('smgo_queue', { id: extract.id, type: qType, payload: extract })) {
     extract.synced = true; saveExtracts(); return;
   }
   // Fallback: local server (same-network only)
@@ -911,7 +913,7 @@ function closeExtractDrawer() {
 
 function renderExtractList() {
   const all = [
-    ...pendingExtracts.map(e => ({ ...e, _kind: 'extract' })),
+    ...pendingExtracts.map(e => ({ ...e, _kind: e.type || 'extract' })),
     ...pendingItems.map(i => ({ ...i, _kind: i.type })),
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -920,7 +922,7 @@ function renderExtractList() {
     return;
   }
 
-  const kindLabel = { extract: '✂ Extract', cloze: '[ ] Cloze', qa: '🤖 Q&A' };
+  const kindLabel = { extract: '✂ Extract', 'pdf-extract-create': '📄 PDF Extract', cloze: '[ ] Cloze', qa: '🤖 Q&A' };
   extractList.innerHTML = all.map((item) => {
     let preview = '';
     if (item._kind === 'extract') preview = esc((item.text  || '').slice(0, 120));
@@ -946,7 +948,7 @@ $('theme-toggle').addEventListener('click', () => {
 
 $('settings-icon').addEventListener('click', () => {
   const choice = prompt(
-    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n\nEnter number:',
+    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n5) PDF folder (for PDF viewer)\n\nEnter number:',
   );
   if (choice === '1') {
     const url = prompt('SMGo server URL (e.g. http://192.168.1.x:3001)', getServerUrl());
@@ -973,6 +975,8 @@ $('settings-icon').addEventListener('click', () => {
       if (key.trim()) localStorage.setItem('smgo_supa_key', key.trim());
       else localStorage.removeItem('smgo_supa_key');
     }
+  } else if (choice === '5') {
+    pickPdfFolder();
   }
 });
 
@@ -1122,6 +1126,279 @@ $('edit-image-clear').addEventListener('click', () => {
   $('edit-image-hint').style.display = '';
 });
 
+// ── PDF folder (File System Access API + IndexedDB) ────────────────────────
+let _pdfDB = null;
+
+function openPdfDB() {
+  if (_pdfDB) return Promise.resolve(_pdfDB);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('smgo', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('handles');
+    req.onsuccess = e => { _pdfDB = e.target.result; resolve(_pdfDB); };
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+async function getPdfDirHandle() {
+  try {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('handles','readonly').objectStore('handles').get('pdfDir');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch { return null; }
+}
+
+async function setPdfDirHandle(handle) {
+  try {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('handles','readwrite').objectStore('handles').put(handle, 'pdfDir');
+      req.onsuccess = () => resolve(true);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch { return false; }
+}
+
+async function pickPdfFolder() {
+  if (!window.showDirectoryPicker) {
+    alert('Your browser does not support folder access.\nUse Chrome or Edge on Android/macOS.');
+    return null;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    await setPdfDirHandle(handle);
+    showFlash('PDF folder saved');
+    return handle;
+  } catch (e) {
+    if (e.name !== 'AbortError') showFlash('Could not select folder');
+    return null;
+  }
+}
+
+async function getPdfFile(filename) {
+  if (!filename) return null;
+  let dirHandle = await getPdfDirHandle();
+  if (!dirHandle) return null;
+  try {
+    const perm = await dirHandle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') {
+      const granted = await dirHandle.requestPermission({ mode: 'read' });
+      if (granted !== 'granted') return null;
+    }
+    const fileHandle = await dirHandle.getFileHandle(filename);
+    return await fileHandle.getFile();
+  } catch { return null; }
+}
+
+// ── PDF viewer ──────────────────────────────────────────────────────────────
+let pdfjsLib         = null;
+let pdfViewerDoc     = null;
+let pdfViewerPage    = 1;
+let pdfViewerCard    = null;
+let pdfViewerBlobUrl = null;
+
+let _pdfJsPromise = null; // singleton load promise, prevents double-load race
+
+async function loadPdfJs() {
+  if (pdfjsLib) return pdfjsLib;
+  if (window.pdfjsLib) { pdfjsLib = window.pdfjsLib; return pdfjsLib; }
+  if (_pdfJsPromise) return _pdfJsPromise;
+  _pdfJsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload = () => {
+      pdfjsLib = window.pdfjsLib;
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      resolve(pdfjsLib);
+    };
+    s.onerror = e => { _pdfJsPromise = null; reject(e); };
+    document.head.appendChild(s);
+  });
+  return _pdfJsPromise;
+}
+
+async function openPdfViewer(card) {
+  pdfViewerCard = card;
+  $('pdf-modal').classList.add('open');
+  $('pdf-title-label').textContent = card.pdfFilename || card.title || '';
+  $('pdf-loading-msg').style.display = 'block';
+  $('pdf-canvas-wrap').style.display = 'none';
+  $('pdf-error-msg').style.display   = 'none';
+  $('pdf-extract-btn').style.display = 'none';
+  $('pdf-sel-label').style.display   = 'none';
+  $('pdf-no-folder-msg').style.display = 'none';
+
+  // pdfSource is either a URL string (blob: or http:) passed to PDF.js
+  let pdfSource = null;
+  let _blobUrl  = null; // track for revocation on close
+
+  // 1. Try local folder first — use blob URL so PDF.js can range-request internally
+  if (card.pdfFilename) {
+    const file = await getPdfFile(card.pdfFilename);
+    if (file) {
+      _blobUrl  = URL.createObjectURL(file);
+      pdfSource = _blobUrl;
+    }
+  }
+
+  // 2. LAN fallback: plugin serves the PDF
+  if (!pdfSource && !isStaticMode()) {
+    pdfSource = `${getServerUrl()}/api/pdf/${card.id}`;
+  }
+
+  if (!pdfSource) {
+    $('pdf-loading-msg').style.display = 'none';
+    const hasFSAPI = !!window.showDirectoryPicker;
+    if (hasFSAPI) {
+      $('pdf-no-folder-msg').style.display = 'flex';
+    } else {
+      $('pdf-error-msg').textContent = 'PDF not available. Connect to home Wi-Fi or use Chrome to select a PDF folder.';
+      $('pdf-error-msg').style.display = 'block';
+    }
+    return;
+  }
+
+  try {
+    const lib = await loadPdfJs();
+    pdfViewerDoc    = await lib.getDocument(pdfSource).promise;
+    pdfViewerBlobUrl = _blobUrl; // remember for cleanup on close
+    // pdfPage is 0-indexed; PDF.js getPage() is 1-indexed
+    pdfViewerPage = card.pdfPage != null ? card.pdfPage + 1 : 1;
+    pdfViewerPage = Math.max(1, Math.min(pdfViewerPage, pdfViewerDoc.numPages));
+    $('pdf-loading-msg').style.display = 'none';
+    $('pdf-canvas-wrap').style.display = '';
+    await renderPdfPage(pdfViewerPage);
+  } catch (e) {
+    if (_blobUrl) URL.revokeObjectURL(_blobUrl);
+    $('pdf-loading-msg').style.display = 'none';
+    const msg = e?.message || String(e);
+    $('pdf-error-msg').textContent = msg.includes('fetch') || msg.includes('Load')
+      ? 'Could not load PDF viewer — internet required for first use.'
+      : `Could not render PDF: ${msg}`;
+    $('pdf-error-msg').style.display = 'block';
+  }
+}
+
+async function renderPdfPage(pageNum) {
+  if (!pdfViewerDoc) return;
+  const page     = await pdfViewerDoc.getPage(pageNum);
+  const canvas   = $('pdf-canvas');
+  const textDiv  = $('pdf-text-layer');
+
+  const vpWidth  = $('pdf-viewport').clientWidth || window.innerWidth;
+  const vp1      = page.getViewport({ scale: 1 });
+  const scale    = Math.max(0.5, Math.min((vpWidth - 24) / vp1.width, 3));
+  const viewport = page.getViewport({ scale });
+
+  canvas.width  = viewport.width;
+  canvas.height = viewport.height;
+  textDiv.style.width  = viewport.width  + 'px';
+  textDiv.style.height = viewport.height + 'px';
+
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+  // Text layer for selection
+  textDiv.innerHTML = '';
+  const textContent = await page.getTextContent();
+  await pdfjsLib.renderTextLayer({
+    textContentSource: textContent,
+    container:         textDiv,
+    viewport,
+    textDivs:          [],
+  }).promise;
+
+  pdfViewerPage = pageNum;
+  $('pdf-page-info').textContent    = `${pageNum} / ${pdfViewerDoc.numPages}`;
+  $('pdf-prev-btn').disabled        = pageNum <= 1;
+  $('pdf-next-btn').disabled        = pageNum >= pdfViewerDoc.numPages;
+
+  // Clear any old text selection state
+  $('pdf-extract-btn').style.display = 'none';
+  $('pdf-sel-label').style.display   = 'none';
+}
+
+function closePdfViewer() {
+  $('pdf-modal').classList.remove('open');
+  if (pdfViewerDoc) { pdfViewerDoc.destroy(); pdfViewerDoc = null; }
+  if (pdfViewerBlobUrl) { URL.revokeObjectURL(pdfViewerBlobUrl); pdfViewerBlobUrl = null; }
+  pdfViewerCard = null;
+  window.getSelection()?.removeAllRanges();
+}
+
+// Watch for text selection inside the PDF text layer
+document.addEventListener('selectionchange', () => {
+  if (!$('pdf-modal')?.classList.contains('open')) return;
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (text.length < 2) {
+    $('pdf-extract-btn').style.display = 'none';
+    $('pdf-sel-label').style.display   = 'none';
+    return;
+  }
+  if (!sel.rangeCount) return;
+  const inTextLayer = n => {
+    const el = n instanceof Element ? n : n.parentElement;
+    return !!el?.closest('.textLayer');
+  };
+  const range = sel.getRangeAt(0);
+  if (inTextLayer(range.startContainer) || inTextLayer(range.commonAncestorContainer)) {
+    $('pdf-extract-btn').style.display = '';
+    $('pdf-sel-label').style.display   = '';
+  }
+});
+
+function extractFromPdf() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !pdfViewerCard) return;
+
+  const card = pdfViewerCard;
+  const rec  = {
+    id:          `pdfex-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type:        'pdf-extract-create',
+    parentId:    card.pdfElementId || card.id,
+    parentTitle: card.pdfFilename  || card.title,
+    text,
+    pdfPage:     pdfViewerPage - 1,  // store 0-indexed to match SM
+    timestamp:   new Date().toISOString(),
+    synced:      false,
+  };
+
+  pendingExtracts.push(rec);
+  saveExtracts();
+  sel.removeAllRanges();
+  $('pdf-extract-btn').style.display = 'none';
+  $('pdf-sel-label').style.display   = 'none';
+  showFlash(`Extracted: "${text.slice(0,40)}${text.length>40?'…':''}"`);
+
+  // Immediate upload
+  uploadExtract(rec);
+}
+
+// Wire up PDF modal buttons
+$('pdf-close-btn').addEventListener('click', closePdfViewer);
+$('pdf-prev-btn').addEventListener('click', () => {
+  if (pdfViewerPage > 1) renderPdfPage(pdfViewerPage - 1);
+});
+$('pdf-next-btn').addEventListener('click', () => {
+  if (pdfViewerDoc && pdfViewerPage < pdfViewerDoc.numPages) renderPdfPage(pdfViewerPage + 1);
+});
+$('pdf-extract-btn').addEventListener('click', extractFromPdf);
+$('pdf-set-folder-btn').addEventListener('click', async () => {
+  const handle = await pickPdfFolder();
+  if (handle && pdfViewerCard) {
+    // Retry loading the PDF now that we have the folder
+    $('pdf-no-folder-msg').style.display = 'none';
+    await openPdfViewer(pdfViewerCard);
+  }
+});
+$('pdf-open-btn').addEventListener('click', () => {
+  if (cards[idx]) openPdfViewer(cards[idx]);
+});
+
 // ── Typography panel ──────────────────────────────────────────────────────
 const TYPO_DEFAULTS = { font: 'sans', size: 'md', spacing: 'normal', width: 'medium' };
 
@@ -1155,8 +1432,14 @@ document.querySelectorAll('[data-typo]').forEach(group => {
 
 // ── Keyboard shortcuts (desktop / MacBook) ────────────────────────────────
 document.addEventListener('keydown', e => {
-  const anyModal = ['edit-modal','qa-modal','cloze-modal'].some(id => $( id)?.classList.contains('open'));
-  if (anyModal) { if (e.key === 'Escape') { ['edit-modal','qa-modal','cloze-modal'].forEach(id => $( id)?.classList.remove('open')); } return; }
+  const anyModal = ['edit-modal','qa-modal','cloze-modal','pdf-modal'].some(id => $(id)?.classList.contains('open'));
+  if (anyModal) {
+    if (e.key === 'Escape') {
+      ['edit-modal','qa-modal','cloze-modal'].forEach(id => $(id)?.classList.remove('open'));
+      if ($('pdf-modal')?.classList.contains('open')) closePdfViewer();
+    }
+    return;
+  }
   if ($('extract-drawer')?.classList.contains('open')) { if (e.key === 'Escape') closeExtractDrawer(); return; }
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
   switch (e.key) {
@@ -1174,6 +1457,9 @@ document.addEventListener('keydown', e => {
         if (confirm('Dismiss this element? It will be marked Done in SuperMemo.')) dismissCard();
       break;
     case 'n': case 'N': e.preventDefault(); openEditModal(); break;
+    case 'p': case 'P':
+      if (cards[idx]?.type === 'pdf-extract') { e.preventDefault(); openPdfViewer(cards[idx]); }
+      break;
     case 'Escape': $('typo-panel')?.classList.remove('open'); break;
   }
 });
