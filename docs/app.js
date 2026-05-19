@@ -668,26 +668,63 @@ async function captureForQA() {
   }
 }
 
+// Models tried in order; first success is cached in localStorage for next time
+const GEMINI_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
+  'gemini-2.0-flash-exp',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-001',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash-8b',
+  'gemini-pro',
+];
+
 async function callGemini(text, apiKey) {
   const prompt = `Convert this text into ONE concise SuperMemo Q&A flashcard for spaced repetition. Return valid JSON with exactly two string fields "question" and "answer", nothing else.\n\nText: ${text}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 300 },
   });
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 5000));
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const e = await res.json(); msg = e?.error?.message || e?.message || msg; } catch {}
-      if (res.status === 429 && attempt < 2) continue;
-      throw new Error(msg);
+  // Put cached working model first so we skip the probe on subsequent calls
+  const cached = localStorage.getItem('smgo_gemini_model');
+  const models = cached
+    ? [cached, ...GEMINI_MODELS.filter(m => m !== cached)]
+    : GEMINI_MODELS;
+
+  let lastErr = 'No compatible Gemini model found for this API key.';
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    let res;
+    try { res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
+    catch (e) { lastErr = e.message; continue; }
+
+    // Model unavailable — try next
+    if (res.status === 404 || res.status === 400) {
+      try { const e = await res.json(); lastErr = e?.error?.message || lastErr; } catch {}
+      continue;
     }
+    // Rate-limited — wait once then retry same model
+    if (res.status === 429) {
+      await new Promise(r => setTimeout(r, 5000));
+      try { res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }); }
+      catch (e) { lastErr = e.message; continue; }
+      if (!res.ok) { lastErr = 'Rate limit reached — wait a minute and try again.'; continue; }
+    }
+    if (!res.ok) {
+      try { const e = await res.json(); lastErr = e?.error?.message || `HTTP ${res.status}`; } catch {}
+      continue;
+    }
+
     const data = await res.json();
-    return JSON.parse(data.candidates[0].content.parts[0].text);
+    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+    localStorage.setItem('smgo_gemini_model', model); // cache for next time
+    return result;
   }
+
+  throw new Error(lastErr);
 }
 
 function saveQA() {
