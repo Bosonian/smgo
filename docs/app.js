@@ -191,8 +191,9 @@ function renderCard() {
 
   let bodyHtml = '';
   if (c.type === 'cloze' && c.clozeSentence) {
-    const blanked = c.clozeSentence.replace('[___]',
-      '<span class="cloze-blank" id="cloze-blank">[___]</span>');
+    let n = 0;
+    const blanked = c.clozeSentence.replace(/\[___\]/g,
+      () => `<span class="cloze-blank" data-bi="${n++}">[___]</span>`);
     bodyHtml = `<div class="cloze-sentence">${blanked}</div>`;
     if (c.body) bodyHtml += `<div class="card-body selectable">${esc(c.body)}</div>`;
   } else if (c.body) {
@@ -211,6 +212,9 @@ function renderCard() {
   revealBtn.style.display = 'block';
   gradeRow.style.display  = 'none';
 
+  const isDismissable = c.type === 'topic' || c.type === 'pdf-extract';
+  $('dismiss-btn').style.display = isDismissable ? 'inline-flex' : 'none';
+
   if (c.type === 'cloze') {
     revealBtn.textContent = 'Reveal Answer';
     revealBtn.onclick = doReveal;
@@ -222,9 +226,28 @@ function renderCard() {
 
 function doReveal() {
   revealed = true;
-  const blank = document.getElementById('cloze-blank');
-  if (blank) blank.classList.add('revealed');
+  document.querySelectorAll('.cloze-blank').forEach(el => el.classList.add('revealed'));
   showGrades();
+}
+
+function skipCard() {
+  idx++;
+  renderCard();
+}
+
+function dismissCard() {
+  const card = cards[idx];
+  if (!card) return;
+  // Record dismiss for server sync
+  const rec = { elementId: card.id, timestamp: new Date().toISOString() };
+  if (!isStaticMode()) {
+    fetch(`${getServerUrl()}/api/dismiss`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rec),
+    }).catch(() => {});
+  }
+  idx++;
+  renderCard();
 }
 function showGrades() {
   revealBtn.style.display = 'none';
@@ -236,7 +259,7 @@ function esc(s) {
 }
 
 // ── Grading ────────────────────────────────────────────────────────────────
-const GRADE_LABELS = [['0','Null'],['1','Fail'],['2','Hard'],['3','Pass'],['4','Good'],['5','Bright']];
+const GRADE_LABELS = [['0','Null'],['1','Bad'],['2','Fail'],['3','Pass'],['4','Good'],['5','Bright']];
 
 (function buildGradeButtons() {
   gradeRow.innerHTML = '';
@@ -327,20 +350,27 @@ function setSyncStatus(msg, cls) {
   syncStatus.className   = cls ? `sync-${cls}` : '';
 }
 
-// ── Extract UI ─────────────────────────────────────────────────────────────
+// ── Extract + Items UI ─────────────────────────────────────────────────────
 let pendingExtracts = [];
+let pendingItems    = [];  // cloze + Q&A
 
 function loadExtracts() {
   try { pendingExtracts = JSON.parse(localStorage.getItem('smgo_extracts') || '[]'); }
   catch { pendingExtracts = []; }
+  try { pendingItems    = JSON.parse(localStorage.getItem('smgo_items')    || '[]'); }
+  catch { pendingItems  = []; }
   updateExtractBadge();
 }
 function saveExtracts() {
   localStorage.setItem('smgo_extracts', JSON.stringify(pendingExtracts));
   updateExtractBadge();
 }
+function saveItems() {
+  localStorage.setItem('smgo_items', JSON.stringify(pendingItems));
+  updateExtractBadge();
+}
 function updateExtractBadge() {
-  const n = pendingExtracts.length;
+  const n = pendingExtracts.length + pendingItems.length;
   extractCount.textContent = n;
   extractBadgeBtn.style.display = n > 0 ? 'flex' : 'none';
 }
@@ -425,35 +455,164 @@ function captureExtract() {
   if (!isStaticMode()) uploadExtract(extract);
 }
 
+// ── Cloze creation ─────────────────────────────────────────────────────────
+let clozeWords = [];
+let clozeParentId = 0;
+let clozeParentTitle = '';
+
+function captureForCloze() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !cards[idx]) { hideExtractToolbar(); return; }
+  clozeParentId    = cards[idx].id;
+  clozeParentTitle = cards[idx].title;
+  clozeWords       = text.split(/(\s+)/).map(t => ({ word: t, blank: false, isSpace: /^\s+$/.test(t) }));
+  sel.removeAllRanges();
+  hideExtractToolbar();
+  renderClozeEditor();
+  $('cloze-modal').classList.add('open');
+}
+
+function renderClozeEditor() {
+  const editor = $('cloze-word-editor');
+  editor.innerHTML = clozeWords.map((w, i) =>
+    w.isSpace ? ' '
+    : `<span class="cloze-word${w.blank ? ' blanked' : ''}" data-i="${i}">${esc(w.word)}</span>`
+  ).join('');
+  editor.querySelectorAll('.cloze-word').forEach(el => {
+    el.addEventListener('click', () => {
+      clozeWords[+el.dataset.i].blank = !clozeWords[+el.dataset.i].blank;
+      renderClozeEditor();
+    });
+  });
+  $('cloze-preview').textContent = clozeWords.map(w =>
+    w.isSpace ? ' ' : w.blank ? `[${w.word}]` : w.word
+  ).join('');
+}
+
+function saveCloze() {
+  if (!clozeWords.filter(w => !w.isSpace).some(w => w.blank)) {
+    alert('Tap at least one word to blank it first.'); return;
+  }
+  const sentence = clozeWords.map(w => w.isSpace ? ' ' : w.blank ? `[${w.word}]` : w.word).join('');
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type: 'cloze', parentId: clozeParentId, parentTitle: clozeParentTitle,
+    sentence, timestamp: new Date().toISOString(), synced: false,
+  };
+  pendingItems.push(item);
+  saveItems();
+  $('cloze-modal').classList.remove('open');
+  showFlash('[ ] Cloze saved');
+  if (!isStaticMode()) uploadItem(item);
+}
+
+// ── Q&A via Gemini ──────────────────────────────────────────────────────────
+let qaParentId = 0;
+let qaParentTitle = '';
+
+async function captureForQA() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !cards[idx]) { hideExtractToolbar(); return; }
+
+  let apiKey = localStorage.getItem('smgo_gemini_key') || '';
+  if (!apiKey) {
+    apiKey = prompt('Enter your Gemini API key:') || '';
+    if (!apiKey) return;
+    localStorage.setItem('smgo_gemini_key', apiKey.trim());
+    apiKey = apiKey.trim();
+  }
+
+  qaParentId    = cards[idx].id;
+  qaParentTitle = cards[idx].title;
+  sel.removeAllRanges();
+  hideExtractToolbar();
+
+  $('qa-loading').style.display   = 'block';
+  $('qa-form').style.display      = 'none';
+  $('qa-modal').classList.add('open');
+
+  try {
+    const { question, answer } = await callGemini(text, apiKey);
+    $('qa-question').value        = question;
+    $('qa-answer').value          = answer;
+    $('qa-loading').style.display = 'none';
+    $('qa-form').style.display    = 'block';
+  } catch (err) {
+    $('qa-modal').classList.remove('open');
+    alert(`Gemini error: ${err.message}`);
+  }
+}
+
+async function callGemini(text, apiKey) {
+  const prompt = `Convert this text into ONE concise SuperMemo Q&A flashcard for spaced repetition. Return valid JSON with exactly two string fields "question" and "answer", nothing else.\n\nText: ${text}`;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 300 } }) }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return JSON.parse(data.candidates[0].content.parts[0].text);
+}
+
+function saveQA() {
+  const question = $('qa-question').value.trim();
+  const answer   = $('qa-answer').value.trim();
+  if (!question || !answer) { alert('Question and answer are required.'); return; }
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type: 'qa', parentId: qaParentId, parentTitle: qaParentTitle,
+    question, answer, timestamp: new Date().toISOString(), synced: false,
+  };
+  pendingItems.push(item);
+  saveItems();
+  $('qa-modal').classList.remove('open');
+  showFlash('🤖 Q&A saved');
+  if (!isStaticMode()) uploadItem(item);
+}
+
+// ── Upload / sync ──────────────────────────────────────────────────────────
 async function uploadExtract(extract) {
   try {
     const res = await fetch(`${getServerUrl()}/api/extracts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(extract),
     });
-    if (res.ok) {
-      extract.synced = true;
-      saveExtracts();
-    }
+    if (res.ok) { extract.synced = true; saveExtracts(); }
+  } catch {}
+}
+
+async function uploadItem(item) {
+  try {
+    const res = await fetch(`${getServerUrl()}/api/items`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    });
+    if (res.ok) { item.synced = true; saveItems(); }
   } catch {}
 }
 
 async function syncAllExtracts() {
-  for (const e of pendingExtracts.filter(x => !x.synced)) {
-    await uploadExtract(e);
-  }
+  for (const e of pendingExtracts.filter(x => !x.synced)) await uploadExtract(e);
+  for (const i of pendingItems.filter(x => !x.synced))    await uploadItem(i);
 }
 
-function showExtractFlash(text) {
+function showFlash(msg) {
   const el = document.createElement('div');
-  el.className = 'extract-flash';
-  el.textContent = `Extracted: "${text.slice(0, 40)}${text.length > 40 ? '…' : ''}"`;
+  el.className   = 'extract-flash';
+  el.textContent = msg;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2000);
 }
 
-// Extract drawer
+function showExtractFlash(text) {
+  showFlash(`Extracted: "${text.slice(0, 40)}${text.length > 40 ? '…' : ''}"`);
+}
+
+// ── Pending items drawer ───────────────────────────────────────────────────
 function openExtractDrawer() {
   renderExtractList();
   extractDrawer.classList.add('open');
@@ -465,25 +624,31 @@ function closeExtractDrawer() {
 }
 
 function renderExtractList() {
-  if (pendingExtracts.length === 0) {
-    extractList.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px;font-size:.85rem">No pending extracts</p>';
+  const all = [
+    ...pendingExtracts.map(e => ({ ...e, _kind: 'extract' })),
+    ...pendingItems.map(i => ({ ...i, _kind: i.type })),
+  ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  if (all.length === 0) {
+    extractList.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px;font-size:.85rem">No pending items</p>';
     return;
   }
-  extractList.innerHTML = pendingExtracts.map((e, i) => `
-    <div class="extract-item">
-      <div class="extract-parent">#${e.parentId} · ${esc(e.parentTitle.slice(0,50))}</div>
-      <div class="extract-text">${esc(e.text.slice(0, 120))}${e.text.length > 120 ? '…' : ''}</div>
-      <div class="extract-meta">${new Date(e.timestamp).toLocaleString()}${e.synced ? ' · ✓ synced' : ''}</div>
-      <button class="extract-delete-btn" data-i="${i}">✕</button>
-    </div>`).join('');
 
-  extractList.querySelectorAll('.extract-delete-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      pendingExtracts.splice(parseInt(btn.dataset.i), 1);
-      saveExtracts();
-      renderExtractList();
-    });
-  });
+  const kindLabel = { extract: '✂ Extract', cloze: '[ ] Cloze', qa: '🤖 Q&A' };
+  extractList.innerHTML = all.map((item) => {
+    let preview = '';
+    if (item._kind === 'extract') preview = esc((item.text  || '').slice(0, 120));
+    if (item._kind === 'cloze')   preview = esc((item.sentence || '').slice(0, 120));
+    if (item._kind === 'qa')      preview = `Q: ${esc((item.question||'').slice(0,80))}`;
+    return `<div class="extract-item">
+      <div class="extract-parent">
+        <span class="kind-badge kind-${item._kind}">${kindLabel[item._kind] || item._kind}</span>
+        #${item.parentId} · ${esc((item.parentTitle||'').slice(0,40))}
+      </div>
+      <div class="extract-text">${preview}</div>
+      <div class="extract-meta">${new Date(item.timestamp).toLocaleString()}${item.synced ? ' · ✓' : ''}</div>
+    </div>`;
+  }).join('');
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -494,11 +659,22 @@ $('theme-toggle').addEventListener('click', () => {
 });
 
 $('settings-icon').addEventListener('click', () => {
-  const url = prompt('SMGo server URL (e.g. http://192.168.1.10:3001)', getServerUrl());
-  if (url !== null) {
-    if (url.trim()) localStorage.setItem('smgo_server', url.trim());
-    else localStorage.removeItem('smgo_server');
-    location.reload();
+  const choice = prompt(
+    'Settings\n\n1) Server URL\n2) Gemini API key\n\nEnter 1 or 2:',
+  );
+  if (choice === '1') {
+    const url = prompt('SMGo server URL', getServerUrl());
+    if (url !== null) {
+      if (url.trim()) localStorage.setItem('smgo_server', url.trim());
+      else localStorage.removeItem('smgo_server');
+      location.reload();
+    }
+  } else if (choice === '2') {
+    const key = prompt('Gemini API key (leave blank to clear):', localStorage.getItem('smgo_gemini_key') || '');
+    if (key !== null) {
+      if (key.trim()) localStorage.setItem('smgo_gemini_key', key.trim());
+      else localStorage.removeItem('smgo_gemini_key');
+    }
   }
 });
 
@@ -508,18 +684,35 @@ $('done-restart-btn').addEventListener('click', () => {
   location.reload();
 });
 
-$('extract-btn').addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  captureExtract();
+// Extract toolbar buttons
+$('extract-btn').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); captureExtract(); });
+$('cloze-btn').addEventListener('click',   e => { e.preventDefault(); e.stopPropagation(); captureForCloze(); });
+$('qa-btn').addEventListener('click',      e => { e.preventDefault(); e.stopPropagation(); captureForQA(); });
+
+// Skip / dismiss
+$('skip-btn').addEventListener('click',    () => skipCard());
+$('dismiss-btn').addEventListener('click', () => {
+  if (confirm('Dismiss this element? It will be marked Done in SuperMemo.')) dismissCard();
 });
+
+// Cloze modal
+$('cloze-modal-close').addEventListener('click',  () => $('cloze-modal').classList.remove('open'));
+$('cloze-cancel-btn').addEventListener('click',   () => $('cloze-modal').classList.remove('open'));
+$('cloze-save-btn').addEventListener('click',     saveCloze);
+
+// Q&A modal
+$('qa-modal-close').addEventListener('click',  () => $('qa-modal').classList.remove('open'));
+$('qa-cancel-btn').addEventListener('click',   () => $('qa-modal').classList.remove('open'));
+$('qa-save-btn').addEventListener('click',     saveQA);
+
+// Drawer
 extractBadgeBtn.addEventListener('click', openExtractDrawer);
 $('extract-drawer-close').addEventListener('click', closeExtractDrawer);
 $('extract-drawer-backdrop').addEventListener('click', closeExtractDrawer);
 $('extract-clear-btn').addEventListener('click', () => {
-  if (confirm('Clear all pending extracts?')) {
-    pendingExtracts = [];
-    saveExtracts();
+  if (confirm('Clear all pending items?')) {
+    pendingExtracts = []; pendingItems = [];
+    saveExtracts(); saveItems();
     renderExtractList();
   }
 });
@@ -527,7 +720,8 @@ $('extract-sync-btn').addEventListener('click', async () => {
   if (isStaticMode()) { alert('Sync only available on home network.'); return; }
   await syncAllExtracts();
   renderExtractList();
-  setSyncStatus(`✓ ${pendingExtracts.filter(e=>e.synced).length} extracts synced`, 'ok');
+  const n = pendingExtracts.filter(e=>e.synced).length + pendingItems.filter(i=>i.synced).length;
+  setSyncStatus(`✓ ${n} items synced`, 'ok');
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────

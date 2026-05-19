@@ -308,6 +308,129 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 #extract-sync-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
 #extract-clear-btn { background: var(--surface2); color: var(--muted); }
 
+/* ── Skip / dismiss row ───────────────────── */
+#card-meta-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 0;
+}
+.secondary-btn {
+  background: none; border: 1px solid var(--border);
+  color: var(--muted); border-radius: 8px;
+  font-size: .78rem; padding: 6px 12px; cursor: pointer;
+}
+.secondary-btn:active { opacity: .7; }
+.dismiss-btn { color: var(--red); border-color: var(--red); }
+
+/* ── Primary button (modals) ──────────────── */
+.primary-btn {
+  background: var(--accent); color: #fff;
+  border: none; border-radius: 8px;
+  font-size: .85rem; font-weight: 600;
+  padding: 10px 18px; cursor: pointer;
+}
+.primary-btn:active { opacity: .85; }
+
+/* ── Extract toolbar multi-button ────────── */
+#extract-toolbar { gap: 6px; }
+#cloze-btn {
+  background: #1e3a5f; color: #60a5fa;
+  border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: .85rem; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+#qa-btn {
+  background: #2d1f47; color: #c084fc;
+  border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: .85rem; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+}
+
+/* ── Modal overlay ────────────────────────── */
+.modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.6); z-index: 600;
+  align-items: flex-end; justify-content: center;
+}
+.modal.open { display: flex; }
+.modal-content {
+  background: var(--surface); border-radius: 18px 18px 0 0;
+  border-top: 1px solid var(--border);
+  width: 100%; max-height: 85vh;
+  display: flex; flex-direction: column;
+  padding: 0 0 env(safe-area-inset-bottom, 12px);
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px 10px;
+  font-size: .95rem; font-weight: 700;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.modal-header button {
+  background: none; border: none; color: var(--muted);
+  font-size: 1.1rem; cursor: pointer;
+}
+.modal-hint {
+  font-size: .78rem; color: var(--muted);
+  padding: 8px 18px 4px;
+}
+.modal-footer {
+  display: flex; gap: 8px; padding: 12px 18px;
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+
+/* ── Cloze word editor ────────────────────── */
+#cloze-word-editor {
+  flex: 1; overflow-y: auto;
+  padding: 12px 18px;
+  display: flex; flex-wrap: wrap; gap: 6px 4px; align-content: flex-start;
+  line-height: 2;
+}
+.cloze-word {
+  display: inline-block;
+  background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px;
+  font-size: .9rem; cursor: pointer;
+  user-select: none; -webkit-user-select: none;
+  transition: background .1s;
+}
+.cloze-word.blanked {
+  background: #1e3a5f; color: #60a5fa;
+  border-color: #3b82f6;
+  text-decoration: line-through;
+}
+.modal-preview-row {
+  padding: 8px 18px 10px;
+  font-size: .82rem; color: var(--muted);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.modal-preview-label { font-weight: 600; margin-right: 6px; }
+#cloze-preview { color: var(--text); }
+
+/* ── Q&A form ─────────────────────────────── */
+#qa-form { flex: 1; overflow-y: auto; padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
+.qa-label { font-size: .78rem; font-weight: 600; color: var(--muted); }
+.qa-textarea {
+  background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: .88rem; font-family: inherit;
+  resize: vertical; width: 100%;
+}
+.qa-textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── Kind badges in drawer ────────────────── */
+.kind-badge {
+  display: inline-block; font-size: .65rem; font-weight: 700;
+  padding: 1px 6px; border-radius: 99px; margin-right: 5px;
+}
+.kind-extract { background: #14352a; color: #4ade80; }
+.kind-cloze   { background: #1e3a5f; color: #60a5fa; }
+.kind-qa      { background: #2d1f47; color: #c084fc; }
+
 /* ── Extracted text highlight ─────────────── */
 mark.extracted-mark {
   background: rgba(34, 197, 94, 0.30);

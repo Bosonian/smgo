@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -32,6 +33,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private CancellationTokenSource? _cts;
     private FileSystemWatcher? _gradesWatcher;
     private FileSystemWatcher? _extractsWatcher;
+    private FileSystemWatcher? _itemsWatcher;
+    private FileSystemWatcher? _dismissesWatcher;
     private Timer? _applyDebounce;
 
     // ── SMA lifecycle ─────────────────────────────────────────────────────
@@ -44,8 +47,10 @@ namespace SuperMemoAssistant.Plugins.SMGo
       // Give SM 2 seconds to fully settle before touching element window
       Task.Delay(2000).ContinueWith(_ =>
       {
-        try { ApplyPendingGrades(); }   catch { }
-        try { ApplyPendingExtracts(); } catch { }
+        try { ApplyPendingGrades(); }    catch { }
+        try { ApplyPendingExtracts(); }  catch { }
+        try { ApplyPendingItems(); }     catch { }
+        try { ApplyPendingDismisses(); } catch { }
       });
 
       StartHttpServer();
@@ -74,46 +79,59 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void StartFileWatchers()
     {
-      var gradesDir  = Path.Combine(DataDir, "grades");
-      var extractDir = Path.Combine(DataDir, "extracts");
+      var gradesDir   = Path.Combine(DataDir, "grades");
+      var extractDir  = Path.Combine(DataDir, "extracts");
+      var itemsDir    = Path.Combine(DataDir, "items");
+      var dismissDir  = Path.Combine(DataDir, "dismisses");
       Directory.CreateDirectory(gradesDir);
       Directory.CreateDirectory(extractDir);
+      Directory.CreateDirectory(itemsDir);
+      Directory.CreateDirectory(dismissDir);
 
-      _gradesWatcher = new FileSystemWatcher(gradesDir, "*.json")
-      {
-        NotifyFilter           = NotifyFilters.FileName | NotifyFilters.LastWrite,
-        EnableRaisingEvents    = true,
-      };
-      _gradesWatcher.Created += OnGradeFileChanged;
-      _gradesWatcher.Changed += OnGradeFileChanged;
+      _gradesWatcher = MakeWatcher(gradesDir,   OnGradeFileChanged);
+      _extractsWatcher = MakeWatcher(extractDir, OnExtractFileChanged);
+      _itemsWatcher    = MakeWatcher(itemsDir,   OnItemFileChanged);
+      _dismissesWatcher = MakeWatcher(dismissDir, OnDismissFileChanged);
+    }
 
-      _extractsWatcher = new FileSystemWatcher(extractDir, "*.json")
+    private static FileSystemWatcher MakeWatcher(string dir, FileSystemEventHandler handler)
+    {
+      var w = new FileSystemWatcher(dir, "*.json")
       {
-        NotifyFilter           = NotifyFilters.FileName | NotifyFilters.LastWrite,
-        EnableRaisingEvents    = true,
+        NotifyFilter        = NotifyFilters.FileName | NotifyFilters.LastWrite,
+        EnableRaisingEvents = true,
       };
-      _extractsWatcher.Created += OnExtractFileChanged;
-      _extractsWatcher.Changed += OnExtractFileChanged;
+      w.Created += handler;
+      w.Changed += handler;
+      return w;
     }
 
     private void StopFileWatchers()
     {
-      if (_gradesWatcher != null)  { _gradesWatcher.EnableRaisingEvents  = false; _gradesWatcher.Dispose();  _gradesWatcher  = null; }
-      if (_extractsWatcher != null) { _extractsWatcher.EnableRaisingEvents = false; _extractsWatcher.Dispose(); _extractsWatcher = null; }
+      StopWatcher(ref _gradesWatcher);
+      StopWatcher(ref _extractsWatcher);
+      StopWatcher(ref _itemsWatcher);
+      StopWatcher(ref _dismissesWatcher);
     }
 
-    private void OnGradeFileChanged(object sender, FileSystemEventArgs e)
+    private static void StopWatcher(ref FileSystemWatcher? w)
     {
-      // Debounce: wait 1 second after last change before applying
-      _applyDebounce?.Dispose();
-      _applyDebounce = new Timer(_ => { try { ApplyPendingGrades(); } catch { } }, null, 1000, Timeout.Infinite);
+      if (w == null) return;
+      w.EnableRaisingEvents = false;
+      w.Dispose();
+      w = null;
     }
 
-    private void OnExtractFileChanged(object sender, FileSystemEventArgs e)
+    private void Debounce(Action action)
     {
       _applyDebounce?.Dispose();
-      _applyDebounce = new Timer(_ => { try { ApplyPendingExtracts(); } catch { } }, null, 1000, Timeout.Infinite);
+      _applyDebounce = new Timer(_ => { try { action(); } catch { } }, null, 1000, Timeout.Infinite);
     }
+
+    private void OnGradeFileChanged(object sender, FileSystemEventArgs e)   => Debounce(ApplyPendingGrades);
+    private void OnExtractFileChanged(object sender, FileSystemEventArgs e) => Debounce(ApplyPendingExtracts);
+    private void OnItemFileChanged(object sender, FileSystemEventArgs e)    => Debounce(ApplyPendingItems);
+    private void OnDismissFileChanged(object sender, FileSystemEventArgs e) => Debounce(ApplyPendingDismisses);
 
     // ── Grade application ─────────────────────────────────────────────────
 
@@ -173,6 +191,87 @@ namespace SuperMemoAssistant.Plugins.SMGo
               builder);
 
             Thread.Sleep(300);
+          }
+
+          var dest = file.Replace(".json", ".applied.json");
+          if (File.Exists(dest)) File.Delete(dest);
+          File.Move(file, dest);
+        }
+        catch { }
+      }
+    }
+
+    // ── Item application (cloze + Q&A) ───────────────────────────────────
+
+    private void ApplyPendingItems()
+    {
+      var itemsDir = Path.Combine(DataDir, "items");
+      if (!Directory.Exists(itemsDir)) return;
+
+      foreach (var file in Directory.GetFiles(itemsDir, "*.json"))
+      {
+        try
+        {
+          var items = JsonConvert.DeserializeObject<List<ItemRecord>>(File.ReadAllText(file));
+          if (items == null || items.Count == 0) continue;
+
+          foreach (var item in items)
+          {
+            ElementBuilder? builder = null;
+
+            if (item.Type == "qa" && !string.IsNullOrWhiteSpace(item.Question))
+            {
+              var qHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(item.Question)}</span>";
+              var aHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(item.Answer)}</span>";
+              builder = new ElementBuilder(ElementType.Item,
+                new TextContent(true, qHtml),
+                new TextContent(true, aHtml))
+                .WithParent(item.ParentId).DoNotDisplay();
+            }
+            else if (item.Type == "cloze" && !string.IsNullOrWhiteSpace(item.Sentence))
+            {
+              // [word] → SM cloze blank
+              var blanked = Regex.Replace(item.Sentence, @"\[([^\]]+)\]",
+                m => $"<span style=\"color:blue\">[...]</span>");
+              var html = $"<span style=\"color:#231F20\">{blanked}</span>";
+              builder = new ElementBuilder(ElementType.Item, new TextContent(true, html))
+                .WithParent(item.ParentId).DoNotDisplay();
+            }
+
+            if (builder == null) continue;
+
+            Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+            Thread.Sleep(300);
+          }
+
+          var dest = file.Replace(".json", ".applied.json");
+          if (File.Exists(dest)) File.Delete(dest);
+          File.Move(file, dest);
+        }
+        catch { }
+      }
+    }
+
+    // ── Dismiss application ───────────────────────────────────────────────
+
+    private void ApplyPendingDismisses()
+    {
+      var dismissDir = Path.Combine(DataDir, "dismisses");
+      if (!Directory.Exists(dismissDir)) return;
+
+      foreach (var file in Directory.GetFiles(dismissDir, "*.json"))
+      {
+        try
+        {
+          var records = JsonConvert.DeserializeObject<List<DismissRecord>>(File.ReadAllText(file));
+          if (records == null || records.Count == 0) continue;
+
+          foreach (var r in records)
+          {
+            Svc.SM.UI.ElementWdw.GoToElement(r.ElementId);
+            Thread.Sleep(400);
+            Svc.SM.UI.ElementWdw.Done();
+            Thread.Sleep(200);
           }
 
           var dest = file.Replace(".json", ".applied.json");
@@ -285,13 +384,27 @@ namespace SuperMemoAssistant.Plugins.SMGo
           return;
         }
 
+        if (url == "/api/items" && req.HttpMethod == "POST")
+        {
+          SaveItem(req, res);
+          return;
+        }
+
+        if (url == "/api/dismiss" && req.HttpMethod == "POST")
+        {
+          SaveDismiss(req, res);
+          return;
+        }
+
         // Apply pending immediately (called by PWA on server wake)
         if (url == "/api/apply" && req.HttpMethod == "POST")
         {
           Task.Run(() =>
           {
-            try { ApplyPendingGrades(); }   catch { }
-            try { ApplyPendingExtracts(); } catch { }
+            try { ApplyPendingGrades(); }    catch { }
+            try { ApplyPendingExtracts(); }  catch { }
+            try { ApplyPendingItems(); }     catch { }
+            try { ApplyPendingDismisses(); } catch { }
           });
           SendJson(res, new { ok = true });
           return;
@@ -359,6 +472,44 @@ namespace SuperMemoAssistant.Plugins.SMGo
       bool found = false;
       foreach (var e in list) if (e["id"]?.ToString() == id) { found = true; break; }
       if (!found) list.Add(extract);
+
+      File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
+      SendJson(res, new { saved = list.Count });
+    }
+
+    private void SaveItem(HttpListenerRequest req, HttpListenerResponse res)
+    {
+      var body = ReadBody(req);
+      var item = JObject.Parse(body);
+      var date = DateTime.Now.ToString("yyyy-MM-dd");
+      var dir  = Path.Combine(DataDir, "items");
+      Directory.CreateDirectory(dir);
+      var file = Path.Combine(dir, $"{date}.json");
+
+      var list = new JArray();
+      if (File.Exists(file)) list = JArray.Parse(File.ReadAllText(file));
+
+      var id = item["id"]?.ToString();
+      bool found = false;
+      foreach (var e in list) if (e["id"]?.ToString() == id) { found = true; break; }
+      if (!found) list.Add(item);
+
+      File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
+      SendJson(res, new { saved = list.Count });
+    }
+
+    private void SaveDismiss(HttpListenerRequest req, HttpListenerResponse res)
+    {
+      var body   = ReadBody(req);
+      var record = JObject.Parse(body);
+      var date   = DateTime.Now.ToString("yyyy-MM-dd");
+      var dir    = Path.Combine(DataDir, "dismisses");
+      Directory.CreateDirectory(dir);
+      var file = Path.Combine(dir, $"{date}.json");
+
+      var list = new JArray();
+      if (File.Exists(file)) list = JArray.Parse(File.ReadAllText(file));
+      list.Add(record);
 
       File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
       SendJson(res, new { saved = list.Count });
@@ -471,5 +622,23 @@ namespace SuperMemoAssistant.Plugins.SMGo
     [JsonProperty("parentTitle")] public string ParentTitle { get; set; } = "";
     [JsonProperty("text")]        public string Text        { get; set; } = "";
     [JsonProperty("timestamp")]   public string Timestamp   { get; set; } = "";
+  }
+
+  internal class ItemRecord
+  {
+    [JsonProperty("id")]          public string Id          { get; set; } = "";
+    [JsonProperty("type")]        public string Type        { get; set; } = ""; // "cloze" | "qa"
+    [JsonProperty("parentId")]    public int    ParentId    { get; set; }
+    [JsonProperty("parentTitle")] public string ParentTitle { get; set; } = "";
+    [JsonProperty("sentence")]    public string Sentence    { get; set; } = ""; // cloze
+    [JsonProperty("question")]    public string Question    { get; set; } = ""; // qa
+    [JsonProperty("answer")]      public string Answer      { get; set; } = ""; // qa
+    [JsonProperty("timestamp")]   public string Timestamp   { get; set; } = "";
+  }
+
+  internal class DismissRecord
+  {
+    [JsonProperty("elementId")] public int    ElementId { get; set; }
+    [JsonProperty("timestamp")] public string Timestamp { get; set; } = "";
   }
 }
