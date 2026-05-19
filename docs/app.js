@@ -1325,6 +1325,8 @@ let _pdfHighlightsFilename = null;
 let _pdfHeaderTimer       = null;
 let _imgCropMode          = false;
 let _imgCropStart         = null;
+let _pdfStagedSegments    = [];
+let _pendingCropData      = null;
 
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -1494,6 +1496,10 @@ function closePdfViewer() {
   _pdfHighlights = []; _pdfHighlightsFilename = null;
   _imgCropStart  = null;
   pdfViewerCard  = null;
+  _pdfStagedSegments = [];
+  _pendingCropData   = null;
+  $('pdf-crop-choice-bar').style.display = 'none';
+  updateStagedBar();
   window.getSelection()?.removeAllRanges();
   updatePdfActionButtons(false);
 }
@@ -1502,7 +1508,8 @@ function updatePdfActionButtons(hasSelection) {
   $('pdf-extract-btn').disabled = !hasSelection;
   $('pdf-cloze-btn').disabled   = !hasSelection;
   $('pdf-qa-btn').disabled      = !hasSelection;
-  ['pdf-extract-btn','pdf-cloze-btn','pdf-qa-btn'].forEach(id =>
+  $('pdf-stage-btn').disabled   = !hasSelection;
+  ['pdf-extract-btn','pdf-cloze-btn','pdf-qa-btn','pdf-stage-btn'].forEach(id =>
     $(id).classList.toggle('sel-active', hasSelection)
   );
 }
@@ -1627,6 +1634,72 @@ function markPageAsRead() {
   showFlash('◉ Page marked as read');
 }
 
+function stageSelection() {
+  const sel  = window.getSelection();
+  const text = sel?.toString().trim() ?? '';
+  if (!text || !pdfViewerCard) return;
+  const rects = getSelectionRects();
+  if (rects.length) addAndRenderHighlight(_pdfHighlightsFilename, pdfViewerPage, rects, text, 'staged');
+  _pdfStagedSegments.push({ kind: 'text', text, rects, page: pdfViewerPage });
+  sel.removeAllRanges();
+  updatePdfActionButtons(false);
+  updateStagedBar();
+  showFlash(`+ Staged "${text.slice(0,30)}${text.length>30?'…':''}"`);
+}
+
+function updateStagedBar() {
+  const bar = $('pdf-staged-bar');
+  if (!bar) return;
+  if (!_pdfStagedSegments.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  const textCount = _pdfStagedSegments.filter(s => s.kind === 'text').length;
+  const imgCount  = _pdfStagedSegments.filter(s => s.kind === 'image').length;
+  const parts = [];
+  if (textCount) parts.push(`${textCount} text`);
+  if (imgCount)  parts.push(`${imgCount} img`);
+  $('pdf-staged-count').textContent = parts.join(' + ') + ' staged';
+}
+
+function clearStaged() {
+  _pdfStagedSegments = [];
+  _pdfHighlights = _pdfHighlights.filter(h => h.type !== 'staged');
+  renderHighlightLayer(pdfViewerPage);
+  updateStagedBar();
+}
+
+async function extractAllStaged() {
+  if (!_pdfStagedSegments.length || !pdfViewerCard) return;
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
+  if (!parentId) { showFlash('Set SM parent in library first'); return; }
+
+  // Convert staged highlights to extract (green)
+  _pdfHighlights = _pdfHighlights.map(h => h.type === 'staged' ? { ...h, type: 'extract' } : h);
+  savePdfHighlights(filename, _pdfHighlights);
+  renderHighlightLayer(pdfViewerPage);
+
+  const segments = _pdfStagedSegments.map(s =>
+    s.kind === 'text' ? { kind: 'text', text: s.text } : { kind: 'image', dataUrl: s.dataUrl }
+  );
+  const rec = {
+    id:          `pdfstage-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type:        'pdf-extract-create',
+    parentId,
+    parentTitle: filename || pdfViewerCard.title,
+    segments,
+    pdfPage:     pdfViewerPage - 1,
+    timestamp:   new Date().toISOString(),
+    synced:      false,
+  };
+  _pdfStagedSegments = [];
+  updateStagedBar();
+
+  pendingExtracts.push(rec);
+  saveExtracts();
+  showFlash(`✂ Staged extract (${segments.length} segments)`);
+  uploadExtract(rec);
+}
+
 // ── Image region extraction ─────────────────────────────────────────────────
 function toggleImgCropMode() {
   _imgCropMode = !_imgCropMode;
@@ -1680,58 +1753,74 @@ function toggleImgCropMode() {
     };
     toggleImgCropMode();
     if (cropRect.width < 8 || cropRect.height < 8) return;
-    await extractImageCrop(cropRect);
+
+    if (_pdfStagedSegments.length > 0) {
+      // Buffer already has content — auto-stage without asking
+      await stageImageCrop(cropRect);
+    } else {
+      // Buffer is empty — offer choice: extract now or start staging
+      const dataUrl = await renderCropToDataUrl(cropRect);
+      if (!dataUrl) { showFlash('Image render failed'); return; }
+      _pendingCropData = { dataUrl };
+      $('pdf-crop-choice-bar').style.display = 'flex';
+    }
   });
 })();
 
-async function extractImageCrop(crop) {
-  if (!pdfViewerDoc || !pdfViewerCard) return;
-  const filename = _pdfHighlightsFilename;
-  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
-  if (!parentId) { showFlash('Set SM parent in library first'); return; }
-
+async function renderCropToDataUrl(crop) {
+  if (!pdfViewerDoc) return null;
   try {
-    showFlash('Rendering image…');
     const page  = await pdfViewerDoc.getPage(pdfViewerPage);
     const vp1   = page.getViewport({ scale: 1 });
     const cur   = ($('pdf-viewport').clientWidth || window.innerWidth) / vp1.width;
-    const scale = Math.max(0.5, Math.min(cur, 3)) * 2; // 2× for quality
+    const scale = Math.max(0.5, Math.min(cur, 3)) * 2;
     const vp    = page.getViewport({ scale });
     const off   = document.createElement('canvas');
     off.width   = vp.width; off.height = vp.height;
     await page.render({ canvasContext: off.getContext('2d'), viewport: vp }).promise;
-
     const dst = document.createElement('canvas');
     dst.width  = crop.width  * 2;
     dst.height = crop.height * 2;
-    dst.getContext('2d').drawImage(off,
-      crop.left*2, crop.top*2, crop.width*2, crop.height*2,
-      0, 0, dst.width, dst.height);
-
-    const dataUrl = await new Promise(res => dst.toBlob(b => {
-      const fr = new FileReader();
-      fr.onloadend = () => res(fr.result);
-      fr.readAsDataURL(b);
+    dst.getContext('2d').drawImage(off, crop.left*2, crop.top*2, crop.width*2, crop.height*2, 0, 0, dst.width, dst.height);
+    return await new Promise(res => dst.toBlob(b => {
+      const fr = new FileReader(); fr.onloadend = () => res(fr.result); fr.readAsDataURL(b);
     }, 'image/png'));
+  } catch { return null; }
+}
 
-    const rec = {
-      id:          `pdfimg-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-      type:        'image-extract',
-      parentId,
-      parentTitle: filename || pdfViewerCard.title,
-      imageData:   dataUrl,
-      pdfPage:     pdfViewerPage - 1,
-      timestamp:   new Date().toISOString(),
-      synced:      false,
-    };
-    pendingExtracts.push(rec);
-    saveExtracts();
-    showFlash('🖼 Image extracted');
-    uploadExtract(rec);
-  } catch (err) {
-    showFlash('Image extraction failed');
-    console.error(err);
-  }
+async function stageImageCrop(cropRect) {
+  const dataUrl = await renderCropToDataUrl(cropRect);
+  if (!dataUrl) { showFlash('Image render failed'); return; }
+  _pdfStagedSegments.push({ kind: 'image', dataUrl, page: pdfViewerPage });
+  updateStagedBar();
+  showFlash('+ Image staged');
+}
+
+function hideCropChoiceBar() {
+  $('pdf-crop-choice-bar').style.display = 'none';
+  _pendingCropData = null;
+}
+
+async function extractImageCrop(dataUrl) {
+  if (!pdfViewerCard) return;
+  const filename = _pdfHighlightsFilename;
+  const parentId = getPdfParentId(filename) || pdfViewerCard.pdfElementId || 0;
+  if (!parentId) { showFlash('Set SM parent in library first'); return; }
+
+  const rec = {
+    id:          `pdfimg-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type:        'image-extract',
+    parentId,
+    parentTitle: filename || pdfViewerCard.title,
+    imageData:   dataUrl,
+    pdfPage:     pdfViewerPage - 1,
+    timestamp:   new Date().toISOString(),
+    synced:      false,
+  };
+  pendingExtracts.push(rec);
+  saveExtracts();
+  showFlash('🖼 Image extracted');
+  uploadExtract(rec);
 }
 
 // ── PDF Library ─────────────────────────────────────────────────────────────
@@ -1868,11 +1957,28 @@ $('pdf-prev-btn').addEventListener('click', () => {
 $('pdf-next-btn').addEventListener('click', () => {
   if (pdfViewerDoc && pdfViewerPage < pdfViewerDoc.numPages) renderPdfPage(pdfViewerPage + 1);
 });
+$('pdf-stage-btn').addEventListener('click', stageSelection);
 $('pdf-extract-btn').addEventListener('click', extractFromPdf);
 $('pdf-cloze-btn').addEventListener('click', pdfCaptureForCloze);
 $('pdf-qa-btn').addEventListener('click', pdfCaptureForQA);
 $('pdf-img-btn').addEventListener('click', toggleImgCropMode);
 $('pdf-mark-btn').addEventListener('click', markPageAsRead);
+$('pdf-stage-extract-btn').addEventListener('click', extractAllStaged);
+$('pdf-stage-clear-btn').addEventListener('click', clearStaged);
+$('pdf-crop-extract-now-btn').addEventListener('click', async () => {
+  if (!_pendingCropData) return;
+  const { dataUrl } = _pendingCropData;
+  hideCropChoiceBar();
+  await extractImageCrop(dataUrl);
+});
+$('pdf-crop-stage-btn').addEventListener('click', () => {
+  if (!_pendingCropData) return;
+  const { dataUrl } = _pendingCropData;
+  hideCropChoiceBar();
+  _pdfStagedSegments.push({ kind: 'image', dataUrl, page: pdfViewerPage });
+  updateStagedBar();
+  showFlash('+ Image staged');
+});
 $('pdf-set-folder-btn').addEventListener('click', async () => {
   const handle = await pickPdfFolder();
   if (handle && pdfViewerCard) {

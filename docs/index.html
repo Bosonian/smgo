@@ -209,11 +209,24 @@
           <div id="pdf-img-crop-overlay"></div>
         </div>
       </div>
+      <!-- Crop choice bar — appears after drawing a crop, only when staging buffer is empty -->
+      <div id="pdf-crop-choice-bar" style="display:none">
+        <span>Image region:</span>
+        <button id="pdf-crop-extract-now-btn">✂ Extract now</button>
+        <button id="pdf-crop-stage-btn">+ Stage</button>
+      </div>
+      <!-- Staged segments bar — shown when buffer has content -->
+      <div id="pdf-staged-bar" style="display:none">
+        <span id="pdf-staged-count">0 staged</span>
+        <button id="pdf-stage-extract-btn">✂ Extract All</button>
+        <button id="pdf-stage-clear-btn">✕</button>
+      </div>
       <div id="pdf-action-bar">
         <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
         <span id="pdf-page-info">–</span>
         <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
         <div class="pdf-bar-sep"></div>
+        <button id="pdf-stage-btn"   class="pdf-act-btn" title="Stage selection for multi-extract" disabled>+</button>
         <button id="pdf-extract-btn" class="pdf-act-btn" title="Extract selection to SM" disabled>✂</button>
         <button id="pdf-cloze-btn"   class="pdf-act-btn" title="Create cloze"            disabled>[ ]</button>
         <button id="pdf-qa-btn"      class="pdf-act-btn" title="Generate Q&amp;A"        disabled>🤖</button>

@@ -188,6 +188,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
             {
               case "extract":             applied = ApplyOneExtract(payload);         break;
               case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload);     break;
+              case "image-extract":       applied = ApplyOneImageExtract(payload);   break;
               case "qa":                  applied = ApplyOneQA(payload);             break;
               case "cloze":               applied = ApplyOneCloze(payload);          break;
               case "grade":               applied = ApplyOneGrade(payload);          break;
@@ -276,10 +277,53 @@ namespace SuperMemoAssistant.Plugins.SMGo
     // Creates a new extract Topic as a child of the PDF root element (not the pdf-extract child)
     private bool ApplyOnePdfExtract(JObject p)
     {
-      var text     = p["text"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
-      if (string.IsNullOrEmpty(text) || parentId <= 0) return false;
-      var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      if (parentId <= 0) return false;
+
+      // Mixed-content staged extract: segments[] array of {kind, text?, dataUrl?}
+      if (p["segments"] is JArray segs && segs.Count > 0)
+      {
+        var sb = new StringBuilder();
+        foreach (var seg in segs)
+        {
+          var kind = seg["kind"]?.ToString();
+          if (kind == "text")
+          {
+            var t = seg["text"]?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(t))
+              sb.Append($"<p style=\"color:#231F20\">{WebUtility.HtmlEncode(t)}</p>");
+          }
+          else if (kind == "image")
+          {
+            var dataUrl = seg["dataUrl"]?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(dataUrl))
+              sb.Append($"<img src=\"{dataUrl}\" style=\"max-width:100%;height:auto\">");
+          }
+        }
+        if (sb.Length == 0) return false;
+        sb.Append("<span />");
+        var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
+          .WithParent(parentId).DoNotDisplay();
+        Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+        return true;
+      }
+
+      // Simple text-only extract
+      var text = p["text"]?.ToString() ?? "";
+      if (string.IsNullOrEmpty(text)) return false;
+      var html = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      var simpleBuilder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
+        .WithParent(parentId).DoNotDisplay();
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, simpleBuilder);
+      return true;
+    }
+
+    private bool ApplyOneImageExtract(JObject p)
+    {
+      var parentId  = p["parentId"]?.Value<int>() ?? 0;
+      var imageData = p["imageData"]?.ToString() ?? "";
+      if (parentId <= 0 || string.IsNullOrEmpty(imageData)) return false;
+      var html    = $"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\"><span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);

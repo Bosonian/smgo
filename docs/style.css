@@ -590,6 +590,7 @@ mark.extracted-mark {
 .pdf-hl-cloze   { background: rgba(59,  130, 246, 0.38); }
 .pdf-hl-qa      { background: rgba(168,  85, 247, 0.38); }
 .pdf-hl-read    { background: rgba(234, 179,   8, 0.20); }
+.pdf-hl-staged  { background: rgba(249, 115,  22, 0.45); }
 
 /* Image-crop drag overlay */
 #pdf-img-crop-overlay {
@@ -625,6 +626,50 @@ mark.extracted-mark {
   display: block; position: absolute;
   inset: 100% 0 -100px;
   cursor: default; user-select: none;
+}
+
+/* ── Staged-segments bar ─────────────────────── */
+#pdf-staged-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  background: rgba(249,115,22,.08);
+  border-top: 1px solid rgba(249,115,22,.3);
+}
+#pdf-staged-count {
+  flex: 1; font-size: .75rem; color: var(--orange); font-weight: 600;
+}
+#pdf-stage-extract-btn {
+  background: var(--accent); color: #fff;
+  border: none; border-radius: 7px;
+  font-size: .75rem; padding: 5px 10px; cursor: pointer;
+}
+#pdf-stage-clear-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--muted); border-radius: 7px;
+  font-size: .75rem; padding: 5px 8px; cursor: pointer;
+}
+
+/* ── Crop choice bar ─────────────────────────── */
+#pdf-crop-choice-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+}
+#pdf-crop-choice-bar span {
+  flex: 1; font-size: .75rem; color: var(--muted);
+}
+#pdf-crop-extract-now-btn {
+  background: var(--accent); color: #fff;
+  border: none; border-radius: 7px;
+  font-size: .75rem; padding: 5px 10px; cursor: pointer;
+}
+#pdf-crop-stage-btn {
+  background: rgba(249,115,22,.15); border: 1px solid var(--orange);
+  color: var(--orange); border-radius: 7px;
+  font-size: .75rem; padding: 5px 10px; cursor: pointer;
 }
 
 /* ── PDF action bar (always visible, bottom) ─ */
