@@ -5,11 +5,13 @@ const path  = require('path');
 const os    = require('os');
 const { getTodayCards } = require('./sm-parser');
 
-const PORT    = 3001;
-const PWA_DIR = path.join(__dirname, 'docs');
-const GRADES_DIR = path.join(__dirname, 'grades');
+const PORT        = 3001;
+const PWA_DIR     = path.join(__dirname, 'docs');
+const GRADES_DIR  = path.join(__dirname, 'grades');
+const EXTRACT_DIR = path.join(__dirname, 'extracts');
 
-if (!fs.existsSync(GRADES_DIR)) fs.mkdirSync(GRADES_DIR);
+if (!fs.existsSync(GRADES_DIR))  fs.mkdirSync(GRADES_DIR);
+if (!fs.existsSync(EXTRACT_DIR)) fs.mkdirSync(EXTRACT_DIR);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -103,6 +105,34 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       sendJson(res, { error: e.message }, 400);
     }
+    return;
+  }
+
+  // POST /api/extracts — save a single extract record
+  if (url === '/api/extracts' && req.method === 'POST') {
+    try {
+      const extract = JSON.parse(await readBody(req));
+      const date    = new Date().toISOString().slice(0, 10);
+      const file    = path.join(EXTRACT_DIR, `${date}.json`);
+      let list = [];
+      if (fs.existsSync(file)) list = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      // Deduplicate by id
+      if (!list.find(e => e.id === extract.id)) list.push(extract);
+      fs.writeFileSync(file, JSON.stringify(list, null, 2));
+      sendJson(res, { saved: list.length });
+    } catch (e) { sendJson(res, { error: e.message }, 400); }
+    return;
+  }
+
+  // GET /api/extracts — return all pending (unapplied) extract files
+  if (url === '/api/extracts' && req.method === 'GET') {
+    const files = fs.readdirSync(EXTRACT_DIR).filter(f => f.endsWith('.json'));
+    const all = [];
+    for (const f of files) {
+      try { all.push(...JSON.parse(fs.readFileSync(path.join(EXTRACT_DIR, f), 'utf-8'))); }
+      catch {}
+    }
+    sendJson(res, all);
     return;
   }
 

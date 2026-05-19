@@ -19,9 +19,17 @@
   <div id="header">
     <h1>SMGo</h1>
     <span id="progress-text">–</span>
+    <button id="extract-badge-btn" style="display:none" title="Pending extracts">
+      ✂ <span id="extract-count">0</span>
+    </button>
     <span id="settings-icon" title="Settings">⚙</span>
   </div>
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+
+  <!-- Floating extract toolbar (appears above text selection) -->
+  <div id="extract-toolbar">
+    <button id="extract-btn">✂ Extract</button>
+  </div>
 
   <!-- Loading screen -->
   <div id="screen-loading">
@@ -57,6 +65,20 @@
     <div id="grade-row"></div>
     <div id="sync-status"></div>
   </div>
+
+  <!-- Extract drawer (slides up from bottom) -->
+  <div id="extract-drawer">
+    <div id="extract-drawer-header">
+      <span>Pending Extracts</span>
+      <button id="extract-drawer-close">✕</button>
+    </div>
+    <div id="extract-list"></div>
+    <div id="extract-drawer-footer">
+      <button id="extract-sync-btn">Sync to server</button>
+      <button id="extract-clear-btn">Clear all</button>
+    </div>
+  </div>
+  <div id="extract-drawer-backdrop"></div>
 
 </div>
 <script src="./app.js"></script>
