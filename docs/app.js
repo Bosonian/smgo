@@ -1312,26 +1312,75 @@ function getPdfParentId(filename) {
   return parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
 }
 
-async function getPdfDirHandle() {
+// ── IDB helpers ────────────────────────────────────────────────────────────
+async function _idbGet(store, key) {
   try {
     const db = await openPdfDB();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction('handles','readonly').objectStore('handles').get('pdfDir');
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror   = () => reject(req.error);
+    return new Promise((res, rej) => {
+      const req = db.transaction(store,'readonly').objectStore(store).get(key);
+      req.onsuccess = () => res(req.result ?? null);
+      req.onerror   = () => rej(req.error);
     });
   } catch { return null; }
 }
-
-async function setPdfDirHandle(handle) {
+async function _idbPut(store, key, value) {
   try {
     const db = await openPdfDB();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction('handles','readwrite').objectStore('handles').put(handle, 'pdfDir');
-      req.onsuccess = () => resolve(true);
-      req.onerror   = () => reject(req.error);
+    return new Promise((res, rej) => {
+      const req = db.transaction(store,'readwrite').objectStore(store).put(value, key);
+      req.onsuccess = () => res(true);
+      req.onerror   = () => rej(req.error);
     });
   } catch { return false; }
+}
+async function _idbDelete(store, key) {
+  try {
+    const db = await openPdfDB();
+    return new Promise((res, rej) => {
+      const req = db.transaction(store,'readwrite').objectStore(store).delete(key);
+      req.onsuccess = () => res(true);
+      req.onerror   = () => rej(req.error);
+    });
+  } catch { return false; }
+}
+
+// ── Multi-folder PDF directory management ──────────────────────────────────
+async function getPdfDirHandles() {
+  let list = await _idbGet('handles', 'pdfDirList');
+  if (!list) {
+    // Migrate legacy single-folder entry
+    const legacy = await _idbGet('handles', 'pdfDir');
+    if (legacy) {
+      const id = `pdfDir_${Date.now()}`;
+      list = [{ id, name: legacy.name || 'PDF Folder' }];
+      await _idbPut('handles', id, legacy);
+      await _idbPut('handles', 'pdfDirList', list);
+    } else {
+      return [];
+    }
+  }
+  const result = [];
+  for (const { id, name } of list) {
+    const handle = await _idbGet('handles', id);
+    if (handle) result.push({ id, name, handle });
+  }
+  return result;
+}
+
+async function addPdfDirHandle(handle) {
+  const id   = `pdfDir_${Date.now()}`;
+  const name = handle.name || 'PDF Folder';
+  const list = (await _idbGet('handles', 'pdfDirList')) || [];
+  if (list.some(e => e.name === name)) { showFlash(`"${name}" already added`); return false; }
+  await _idbPut('handles', id, handle);
+  await _idbPut('handles', 'pdfDirList', [...list, { id, name }]);
+  return true;
+}
+
+async function removePdfDirHandle(id) {
+  const list = ((await _idbGet('handles', 'pdfDirList')) || []).filter(e => e.id !== id);
+  await _idbDelete('handles', id);
+  await _idbPut('handles', 'pdfDirList', list);
 }
 
 async function pickPdfFolder() {
@@ -1341,8 +1390,8 @@ async function pickPdfFolder() {
   }
   try {
     const handle = await window.showDirectoryPicker({ mode: 'read' });
-    await setPdfDirHandle(handle);
-    showFlash('PDF folder saved');
+    const added  = await addPdfDirHandle(handle);
+    if (added) showFlash(`📁 "${handle.name}" added`);
     return handle;
   } catch (e) {
     if (e.name !== 'AbortError') showFlash('Could not select folder');
@@ -1352,17 +1401,17 @@ async function pickPdfFolder() {
 
 async function getPdfFile(filename) {
   if (!filename) return null;
-  let dirHandle = await getPdfDirHandle();
-  if (!dirHandle) return null;
-  try {
-    const perm = await dirHandle.queryPermission({ mode: 'read' });
-    if (perm !== 'granted') {
-      const granted = await dirHandle.requestPermission({ mode: 'read' });
-      if (granted !== 'granted') return null;
-    }
-    const fileHandle = await dirHandle.getFileHandle(filename);
-    return await fileHandle.getFile();
-  } catch { return null; }
+  const dirs = await getPdfDirHandles();
+  for (const { handle } of dirs) {
+    try {
+      let perm = await handle.queryPermission({ mode: 'read' });
+      if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+      if (perm !== 'granted') continue;
+      const fh = await handle.getFileHandle(filename);
+      return await fh.getFile();
+    } catch {} // not in this folder — try next
+  }
+  return null;
 }
 
 // ── PDF viewer ──────────────────────────────────────────────────────────────
@@ -1952,16 +2001,15 @@ async function openLibrary() {
   const listEl = $('library-list');
   listEl.innerHTML = '<p class="lib-empty">Loading…</p>';
 
-  const dirHandle = await getPdfDirHandle();
-  if (!dirHandle) {
+  const dirs = await getPdfDirHandles();
+  if (!dirs.length) {
     if (window.showDirectoryPicker) {
       listEl.innerHTML = `<div class="lib-no-folder">
-        <p>No PDF folder set.</p>
-        <button id="lib-setup-folder-btn" class="primary-btn">Select PDF folder</button>
+        <p>No PDF folder added yet.</p>
+        <button id="lib-setup-folder-btn" class="primary-btn">Add PDF folder</button>
       </div>`;
       $('lib-setup-folder-btn').addEventListener('click', async () => {
-        const h = await pickPdfFolder();
-        if (h) openLibrary();
+        if (await pickPdfFolder()) openLibrary();
       });
     } else {
       listEl.innerHTML = '<p class="lib-empty">File access not supported. Use Chrome or Edge.</p>';
@@ -1969,49 +2017,52 @@ async function openLibrary() {
     return;
   }
 
-  let pdfs = [];
-  try {
-    const perm = await dirHandle.queryPermission({ mode: 'read' });
-    if (perm !== 'granted') {
-      const granted = await dirHandle.requestPermission({ mode: 'read' });
-      if (granted !== 'granted') {
-        listEl.innerHTML = '<p class="lib-empty">Folder access denied.</p>';
-        return;
+  const globalParent = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
+  let html = '';
+
+  for (const { id: folderId, name: folderName, handle } of dirs) {
+    html += `<div class="pdf-lib-folder-hdr">
+      <span class="pdf-lib-folder-name">📁 ${esc(folderName)}</span>
+      <button class="pdf-lib-folder-rm" data-fid="${esc(folderId)}" title="Remove folder">×</button>
+    </div>`;
+
+    let pdfs = [], err = null;
+    try {
+      let perm = await handle.queryPermission({ mode: 'read' });
+      if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+      if (perm !== 'granted') throw new Error('Access denied');
+      for await (const entry of handle.values()) {
+        if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf'))
+          pdfs.push(entry.name);
+      }
+      pdfs.sort((a, b) => a.localeCompare(b));
+    } catch (e) { err = e.message; }
+
+    if (err) {
+      html += `<p class="lib-empty lib-indent">${esc(err)}</p>`;
+    } else if (!pdfs.length) {
+      html += `<p class="lib-empty lib-indent">No PDFs in this folder</p>`;
+    } else {
+      for (const name of pdfs) {
+        const page     = localStorage.getItem(`smgo_pdf_pos_${name}`);
+        const hlCount  = parseInt(localStorage.getItem(`smgo_pdf_hlcount_${name}`) || '0', 10);
+        const perPar   = parseInt(localStorage.getItem(`smgo_pdf_parent_${name}`) || '0', 10);
+        const parLabel = perPar ? `#${perPar}` : (globalParent ? `#${globalParent}` : '–');
+        html += `<div class="pdf-lib-item" data-name="${esc(name)}">
+          <div class="pdf-lib-info">
+            <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
+            <div class="pdf-lib-meta">
+              <span>${page ? `p. ${page}` : 'Not started'}</span>
+              ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
+            </div>
+          </div>
+          <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
+        </div>`;
       }
     }
-    for await (const entry of dirHandle.values()) {
-      if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf'))
-        pdfs.push(entry.name);
-    }
-  } catch (e) {
-    listEl.innerHTML = `<p class="lib-empty">Could not read folder: ${esc(e.message)}</p>`;
-    return;
   }
 
-  pdfs.sort((a, b) => a.localeCompare(b));
-
-  if (!pdfs.length) {
-    listEl.innerHTML = '<p class="lib-empty">No PDF files found in this folder.</p>';
-    return;
-  }
-
-  const globalParent = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
-  listEl.innerHTML = pdfs.map(name => {
-    const page     = localStorage.getItem(`smgo_pdf_pos_${name}`);
-    const hlCount  = parseInt(localStorage.getItem(`smgo_pdf_hlcount_${name}`) || '0', 10);
-    const perPar   = parseInt(localStorage.getItem(`smgo_pdf_parent_${name}`) || '0', 10);
-    const parLabel = perPar ? `#${perPar}` : (globalParent ? `#${globalParent}` : '–');
-    return `<div class="pdf-lib-item" data-name="${esc(name)}">
-      <div class="pdf-lib-info">
-        <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
-        <div class="pdf-lib-meta">
-          <span>${page ? `p. ${page}` : 'Not started'}</span>
-          ${hlCount ? `<span class="pdf-lib-hl-count">${hlCount} extracts</span>` : ''}
-        </div>
-      </div>
-      <button class="pdf-lib-parent-btn" data-name="${esc(name)}" title="Set SM parent element">SM: ${esc(parLabel)}</button>
-    </div>`;
-  }).join('');
+  listEl.innerHTML = html;
 
   listEl.querySelectorAll('.pdf-lib-item').forEach(el => {
     el.addEventListener('click', e => {
@@ -2019,6 +2070,7 @@ async function openLibrary() {
       openPdfFromLibrary(el.dataset.name);
     });
   });
+
   listEl.querySelectorAll('.pdf-lib-parent-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -2037,6 +2089,17 @@ async function openLibrary() {
       } else {
         alert('Must be a numeric element ID.');
       }
+    });
+  });
+
+  listEl.querySelectorAll('.pdf-lib-folder-rm').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const folderName = btn.closest('.pdf-lib-folder-hdr')
+        ?.querySelector('.pdf-lib-folder-name')?.textContent?.replace('📁 ', '') ?? '';
+      if (!confirm(`Remove "${folderName}" from library?\nFiles on disk are not affected.`)) return;
+      await removePdfDirHandle(btn.dataset.fid);
+      openLibrary();
     });
   });
 }

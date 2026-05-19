@@ -772,6 +772,32 @@ mark.extracted-mark {
   color: var(--muted); text-align: center;
   padding: 32px 24px; font-size: .85rem;
 }
+.lib-indent {
+  padding: 10px 20px 10px 32px !important;
+  text-align: left !important;
+}
+
+/* Folder section header in library */
+.pdf-lib-folder-hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 6px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 2;
+}
+.pdf-lib-folder-name {
+  flex: 1; font-size: .78rem; font-weight: 600;
+  color: var(--muted); letter-spacing: .03em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pdf-lib-folder-rm {
+  background: none; border: none;
+  color: var(--muted); font-size: 1rem;
+  cursor: pointer; padding: 2px 6px; line-height: 1;
+  border-radius: 4px; flex-shrink: 0;
+}
+.pdf-lib-folder-rm:hover { background: var(--border); color: var(--red); }
+
 .lib-no-folder {
   display: flex; flex-direction: column;
   align-items: center; gap: 16px;
