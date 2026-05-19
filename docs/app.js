@@ -481,6 +481,16 @@ function loadExtracts() {
   try { pendingItems    = JSON.parse(localStorage.getItem('smgo_items')    || '[]'); }
   catch { pendingItems  = []; }
   updateExtractBadge();
+  const ls = localStorage.getItem('smgo_last_sync');
+  if (ls) {
+    const d = new Date(ls);
+    const isToday = d.toDateString() === new Date().toDateString();
+    const label = isToday
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' '
+          + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setSyncStatus(`Last sync: ${label}`, '');
+  }
 }
 function saveExtracts() {
   localStorage.setItem('smgo_extracts', JSON.stringify(pendingExtracts));
@@ -491,7 +501,8 @@ function saveItems() {
   updateExtractBadge();
 }
 function updateExtractBadge() {
-  const n = pendingExtracts.length + pendingItems.length;
+  const n = pendingExtracts.filter(e => !e.synced).length
+          + pendingItems.filter(i => !i.synced).length;
   extractCount.textContent = n;
   extractBadgeBtn.style.display = n > 0 ? 'flex' : 'none';
 }
@@ -739,8 +750,26 @@ function showExtractFlash(text) {
 // ── Pending items drawer ───────────────────────────────────────────────────
 function openExtractDrawer() {
   renderExtractList();
+  updateDrawerSyncTime();
   extractDrawer.classList.add('open');
   $('extract-drawer-backdrop').classList.add('open');
+}
+
+function updateDrawerSyncTime() {
+  const ls = localStorage.getItem('smgo_last_sync');
+  const el = $('extract-last-sync');
+  if (!el) return;
+  if (ls) {
+    const d = new Date(ls);
+    const isToday = d.toDateString() === new Date().toDateString();
+    const label = isToday
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' '
+          + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    el.textContent = `Last sync: ${label}`;
+  } else {
+    el.textContent = 'Not yet synced';
+  }
 }
 function closeExtractDrawer() {
   extractDrawer.classList.remove('open');
@@ -857,10 +886,24 @@ $('extract-sync-btn').addEventListener('click', async () => {
     alert('No sync route available.\n\nOptions:\n• Set server URL in ⚙ (same WiFi)\n• Configure Supabase in ⚙ (anywhere)');
     return;
   }
+  const btn = $('extract-sync-btn');
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
   await syncAllExtracts();
+  btn.disabled = false;
+  btn.textContent = 'Sync to server';
   renderExtractList();
-  const n = pendingExtracts.filter(e=>e.synced).length + pendingItems.filter(i=>i.synced).length;
-  setSyncStatus(`✓ ${n} items synced`, 'ok');
+  updateExtractBadge();
+
+  const synced = pendingExtracts.filter(e => e.synced).length
+               + pendingItems.filter(i => i.synced).length;
+  const total  = pendingExtracts.length + pendingItems.length;
+  const now    = new Date();
+  const time   = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  localStorage.setItem('smgo_last_sync', now.toISOString());
+  updateDrawerSyncTime();
+  showFlash(`✓ ${synced} of ${total} synced`);
+  setSyncStatus(`✓ Last sync: ${time}`, 'ok');
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────

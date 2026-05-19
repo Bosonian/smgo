@@ -274,8 +274,12 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 }
 
 #extract-drawer-footer {
-  display: flex; gap: 8px; padding: 12px 18px;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 18px 14px;
   border-top: 1px solid var(--border);
+}
+#extract-last-sync {
+  font-size: .7rem; color: var(--muted); text-align: center;
+  min-height: .9rem;
 }
 #extract-sync-btn, #extract-clear-btn {
   flex: 1; padding: 10px;
