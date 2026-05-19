@@ -734,6 +734,21 @@ const GEMINI_MODELS = [
   'gemini-1.5-flash',
 ];
 
+function extractGeminiJson(raw) {
+  // Strategy 1: direct parse (works when responseMimeType:application/json is honoured)
+  try { const r = JSON.parse(raw.trim()); if (r && r.question) return r; } catch {}
+  // Strategy 2: strip ``` fences (Gemini 2.5 sometimes ignores responseMimeType)
+  const fenced = raw.replace(/^```(?:json)?[\r\n]*/im, '').replace(/[\r\n]*```\s*$/m, '').trim();
+  try { const r = JSON.parse(fenced); if (r && r.question) return r; } catch {}
+  // Strategy 3: extract first {...} block (handles preamble / postamble text)
+  const m = raw.match(/\{[\s\S]*?\}/);
+  if (m) { try { const r = JSON.parse(m[0]); if (r && r.question) return r; } catch {} }
+  // Strategy 4: extract largest {...} block (greedy, catches nested braces)
+  const m2 = raw.match(/\{[\s\S]*\}/);
+  if (m2) { try { const r = JSON.parse(m2[0]); if (r && r.question) return r; } catch {} }
+  return null;
+}
+
 async function callGemini(text, apiKey) {
   const prompt = `Convert this text into ONE concise SuperMemo Q&A flashcard for spaced repetition. Return valid JSON with exactly two string fields "question" and "answer", nothing else.\n\nText: ${text}`;
   const body = JSON.stringify({
@@ -779,13 +794,10 @@ async function callGemini(text, apiKey) {
         : 'Gemini returned no candidates.';
       continue;
     }
-    let raw = data.candidates[0].content.parts[0].text || '';
-    // Strip optional ```json ... ``` markdown fences Gemini sometimes adds
-    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    let result;
-    try { result = JSON.parse(raw); }
-    catch { lastErr = `Invalid JSON from Gemini: ${raw.slice(0, 120)}`; continue; }
-    localStorage.setItem('smgo_gemini_model', model); // cache for next time
+    const raw = data.candidates[0].content.parts[0].text || '';
+    const result = extractGeminiJson(raw);
+    if (!result) { lastErr = `Could not parse JSON from: ${raw.slice(0, 160)}`; continue; }
+    localStorage.setItem('smgo_gemini_model', model);
     return result;
   }
 
