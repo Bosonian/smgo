@@ -562,12 +562,14 @@ function captureExtract() {
   pendingExtracts.push(extract);
   saveExtracts();
 
-  // Wrap the selected range in a highlight mark (matches native SM behaviour)
+  // Highlight the extracted range. surroundContents() fails when the selection
+  // crosses element boundaries, so we use extractContents() + insertNode() instead.
   try {
     const range = sel.getRangeAt(0);
     const mark  = document.createElement('mark');
     mark.className = 'extracted-mark';
-    range.surroundContents(mark);
+    mark.appendChild(range.extractContents());
+    range.insertNode(mark);
   } catch {}
   sel.removeAllRanges();
   hideExtractToolbar();
@@ -668,15 +670,23 @@ async function captureForQA() {
 
 async function callGemini(text, apiKey) {
   const prompt = `Convert this text into ONE concise SuperMemo Q&A flashcard for spaced repetition. Return valid JSON with exactly two string fields "question" and "answer", nothing else.\n\nText: ${text}`;
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 300 } }) }
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  return JSON.parse(data.candidates[0].content.parts[0].text);
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3, maxOutputTokens: 300 },
+  });
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 5000));
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (res.status === 429) {
+      if (attempt < 2) continue; // retry after delay
+      throw new Error('Gemini rate limit reached — wait a minute and try again.');
+    }
+    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+    const data = await res.json();
+    return JSON.parse(data.candidates[0].content.parts[0].text);
+  }
 }
 
 function saveQA() {
