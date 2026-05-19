@@ -15,28 +15,50 @@ if (!config.supabaseUrl || !config.supabaseKey) {
   process.exit(0);
 }
 
-const date    = new Date().toISOString().slice(0, 10);
-const cards   = getTodayCards();
-const payload = { date, count: cards.length, cards, generated: new Date().toISOString() };
-const body    = JSON.stringify({ date, data: payload });
-
-const supaUrl = new URL(config.supabaseUrl.replace(/\/$/, ''));
-const options = {
-  hostname: supaUrl.hostname,
-  path:     '/rest/v1/smgo_daily',
-  method:   'POST',
-  headers: {
-    'apikey':         config.supabaseKey,
-    'Authorization':  `Bearer ${config.supabaseKey}`,
-    'Content-Type':   'application/json',
-    'Prefer':         'resolution=merge-duplicates',
-    'Content-Length': Buffer.byteLength(body),
-  },
+const base    = config.supabaseUrl.replace(/\/$/, '');
+const headers = {
+  'apikey':        config.supabaseKey,
+  'Authorization': `Bearer ${config.supabaseKey}`,
+  'Content-Type':  'application/json',
 };
 
-const req = https.request(options, res => {
-  console.log(`SMGo: pushed ${cards.length} cards to Supabase (HTTP ${res.statusCode})`);
-});
-req.on('error', e => console.error('SMGo export-cloud error:', e.message));
-req.write(body);
-req.end();
+function supaRequest(path, method, body, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const url  = new URL(base + path);
+    const data = body ? JSON.stringify(body) : '';
+    const opts = {
+      hostname: url.hostname,
+      path:     url.pathname + url.search,
+      method,
+      headers:  { ...headers, ...extraHeaders, 'Content-Length': Buffer.byteLength(data) },
+    };
+    const req = https.request(opts, res => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: raw }));
+    });
+    req.on('error', reject);
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+(async () => {
+  // Ensure tables exist (idempotent — safe to call every time)
+  const setup = await supaRequest('/rest/v1/rpc/smgo_setup', 'POST', {});
+  if (setup.status !== 200 && setup.status !== 204) {
+    console.error(`SMGo: smgo_setup() failed (${setup.status}): ${setup.body}`);
+    // Non-fatal — tables may already exist
+  }
+
+  const date    = new Date().toISOString().slice(0, 10);
+  const cards   = getTodayCards();
+  const payload = { date, count: cards.length, cards, generated: new Date().toISOString() };
+
+  const push = await supaRequest(
+    '/rest/v1/smgo_daily', 'POST',
+    { date, data: payload },
+    { 'Prefer': 'resolution=merge-duplicates' }
+  );
+  console.log(`SMGo: pushed ${cards.length} cards to Supabase (HTTP ${push.status})`);
+})().catch(e => console.error('SMGo export-cloud error:', e.message));
