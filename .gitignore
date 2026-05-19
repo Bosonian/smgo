@@ -1,7 +1,10 @@
 node_modules/
 grades/
+extracts/
 GradeApplicator/bin/
 GradeApplicator/obj/
 GradeApplicator/publish/
+SMAPlugin/bin/
+SMAPlugin/obj/
 pwa/
 *.applied.json

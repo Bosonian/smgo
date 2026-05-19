@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>SuperMemoAssistant.Plugins.SMGo</RootNamespace>
+    <AssemblyName>SuperMemoAssistant.Plugins.SMGo</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SuperMemoAssistant.Interop" Version="2.1.0-beta.26" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+
+  <!-- After build: copy output to SMA Development plugins folder -->
+  <Target Name="CopyOutput" AfterTargets="Build">
+    <Exec Command="xcopy /h /i /c /k /e /r /y &quot;$(TargetDir)*&quot; &quot;$(UserProfile)\SuperMemoAssistant\Plugins\Development\$(AssemblyName)&quot;" />
+  </Target>
+</Project>
