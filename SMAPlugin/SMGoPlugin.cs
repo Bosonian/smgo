@@ -15,6 +15,7 @@ using SuperMemoAssistant.Interop.SuperMemo.Core;
 using SuperMemoAssistant.Interop.SuperMemo.Elements.Builders;
 using SuperMemoAssistant.Interop.SuperMemo.Elements.Models;
 using SuperMemoAssistant.Interop.SuperMemo.Content.Contents;
+using SuperMemoAssistant.Interop.SuperMemo.Content.Models;
 using SuperMemoAssistant.Interop.SuperMemo.Elements.Types;
 using SuperMemoAssistant.Services;
 
@@ -253,8 +254,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
       if (string.IsNullOrWhiteSpace(question)) return false;
       var qHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(question)}</span>";
       var aHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(answer)}</span>";
-      var builder = new ElementBuilder(ElementType.Item,
-        new TextContent(true, qHtml), new TextContent(true, aHtml))
+      var qContent = new TextContent(true, qHtml);
+      var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
+      var builder = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
       return true;

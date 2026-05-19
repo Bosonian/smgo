@@ -1541,17 +1541,19 @@ async function renderPdfPage(pageNum) {
 
   const vpWidth  = $('pdf-viewport').clientWidth || window.innerWidth;
   const vp1      = page.getViewport({ scale: 1 });
-  const scale    = Math.max(0.5, Math.min(vpWidth / vp1.width, 3));
-  const viewport = page.getViewport({ scale });
+  const dpr      = Math.min(window.devicePixelRatio || 1, 3);
+  const cssScale = Math.max(0.5, Math.min(vpWidth / vp1.width, 3));
+  const hiVp     = page.getViewport({ scale: cssScale * dpr }); // physical pixels
+  const cssVp    = page.getViewport({ scale: cssScale });        // CSS pixels for text layer
 
-  canvas.width  = viewport.width;
-  canvas.height = viewport.height;
-  canvas.style.width  = '';
+  canvas.width  = Math.round(hiVp.width);
+  canvas.height = Math.round(hiVp.height);
+  canvas.style.width  = '';  // CSS width:100%; height:auto sets display size
   canvas.style.height = '';
-  textDiv.style.width  = viewport.width  + 'px';
-  textDiv.style.height = viewport.height + 'px';
+  textDiv.style.width  = Math.round(cssVp.width)  + 'px';
+  textDiv.style.height = Math.round(cssVp.height) + 'px';
 
-  const renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport });
+  const renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: hiVp });
   _activeRenderTask = renderTask;
   try {
     await renderTask.promise;
@@ -1561,13 +1563,13 @@ async function renderPdfPage(pageNum) {
   }
   _activeRenderTask = null;
 
-  // Text layer for selection
+  // Text layer for selection — use CSS viewport so selection coords stay correct
   textDiv.innerHTML = '';
   const textContent = await page.getTextContent();
   const textTask = pdfjsLib.renderTextLayer({
     textContentSource: textContent,
     container:         textDiv,
-    viewport,
+    viewport:          cssVp,
     textDivs:          [],
   });
   try {
