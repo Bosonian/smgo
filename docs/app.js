@@ -1577,7 +1577,7 @@ async function renderPdfPage(pageNum) {
   }
 
   pdfViewerPage = pageNum;
-  $('pdf-page-info').textContent = `${pageNum} / ${pdfViewerDoc.numPages}`;
+  $('pdf-page-info').value = `${pageNum} / ${pdfViewerDoc.numPages}`;
   $('pdf-prev-btn').disabled     = pageNum <= 1;
   $('pdf-next-btn').disabled     = pageNum >= pdfViewerDoc.numPages;
   $('pdf-canvas-wrap').style.display = '';
@@ -1606,6 +1606,9 @@ function closePdfViewer() {
   _pdfColDivX        = null;
   $('pdf-crop-choice-bar').style.display = 'none';
   updateStagedBar();
+  const inner = document.querySelector('.pdf-modal-inner');
+  inner.classList.remove('toolbar-hidden');
+  $('pdf-toolbar-toggle').textContent = '▾';
   window.getSelection()?.removeAllRanges();
   updatePdfActionButtons(false);
 }
@@ -2165,6 +2168,56 @@ $('pdf-set-folder-btn').addEventListener('click', async () => {
 // Tap viewport to restore auto-hidden header
 $('pdf-viewport').addEventListener('click', () => {
   if ($('pdf-modal').classList.contains('open')) showPdfHeader();
+});
+
+// ── Page number input ──────────────────────────────────────────────────────
+$('pdf-page-info').addEventListener('focus', () => {
+  const inp = $('pdf-page-info');
+  inp.removeAttribute('readonly');
+  inp.value = String(pdfViewerPage || '');
+  inp.select();
+});
+$('pdf-page-info').addEventListener('blur', () => {
+  const inp = $('pdf-page-info');
+  inp.setAttribute('readonly', '');
+  inp.value = pdfViewerDoc
+    ? `${pdfViewerPage} / ${pdfViewerDoc.numPages}`
+    : '–';
+});
+$('pdf-page-info').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const n = parseInt($('pdf-page-info').value, 10);
+    if (pdfViewerDoc && n >= 1 && n <= pdfViewerDoc.numPages) renderPdfPage(n);
+    $('pdf-page-info').blur();
+    e.preventDefault();
+  } else if (e.key === 'Escape') {
+    $('pdf-page-info').blur();
+  }
+});
+
+// ── Touch swipe to turn pages ──────────────────────────────────────────────
+let _touchSwipeStart = null;
+$('pdf-viewport').addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return;
+  _touchSwipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+$('pdf-viewport').addEventListener('touchend', e => {
+  if (!_touchSwipeStart || _imgCropMode) return;
+  const dx = e.changedTouches[0].clientX - _touchSwipeStart.x;
+  const dy = e.changedTouches[0].clientY - _touchSwipeStart.y;
+  _touchSwipeStart = null;
+  // Require a clear horizontal swipe: >60px, more horizontal than vertical
+  if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
+  if (dx < 0 && pdfViewerDoc && pdfViewerPage < pdfViewerDoc.numPages) renderPdfPage(pdfViewerPage + 1);
+  else if (dx > 0 && pdfViewerPage > 1) renderPdfPage(pdfViewerPage - 1);
+}, { passive: true });
+$('pdf-viewport').addEventListener('touchcancel', () => { _touchSwipeStart = null; }, { passive: true });
+
+// ── Toolbar collapse toggle ────────────────────────────────────────────────
+$('pdf-toolbar-toggle').addEventListener('click', () => {
+  const inner  = document.querySelector('.pdf-modal-inner');
+  const hidden = inner.classList.toggle('toolbar-hidden');
+  $('pdf-toolbar-toggle').textContent = hidden ? '▴' : '▾';
 });
 $('pdf-open-btn').addEventListener('click', () => {
   if (cards[idx]) openPdfViewer(cards[idx]);

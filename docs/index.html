@@ -209,6 +209,8 @@
           <div id="pdf-img-crop-overlay"></div>
         </div>
       </div>
+      <!-- Toolbar toggle — always visible at right edge, collapses action bar for reading -->
+      <button id="pdf-toolbar-toggle" title="Toggle toolbar">▾</button>
       <!-- Crop choice bar — appears after drawing a crop, only when staging buffer is empty -->
       <div id="pdf-crop-choice-bar" style="display:none">
         <span>Image region:</span>
@@ -223,7 +225,7 @@
       </div>
       <div id="pdf-action-bar">
         <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
-        <span id="pdf-page-info">–</span>
+        <input id="pdf-page-info" type="text" value="–" readonly inputmode="numeric" title="Tap to jump to page">
         <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
         <div class="pdf-bar-sep"></div>
         <button id="pdf-stage-btn"   class="pdf-act-btn" title="Stage selection for multi-extract" disabled>+</button>

@@ -688,7 +688,38 @@ mark.extracted-mark {
 .pdf-nav-btn:disabled { opacity: .35; pointer-events: none; }
 #pdf-page-info {
   font-size: .78rem; color: var(--muted);
-  white-space: nowrap; min-width: 58px; text-align: center; flex-shrink: 0;
+  white-space: nowrap; width: 70px; text-align: center; flex-shrink: 0;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 5px; outline: none; cursor: pointer;
+  padding: 3px 2px;
+}
+#pdf-page-info:not([readonly]) {
+  background: var(--surface2); border-color: var(--accent);
+  color: var(--text); cursor: text;
+}
+
+/* ── Toolbar toggle tab ──────────────────────── */
+#pdf-toolbar-toggle {
+  align-self: flex-end;
+  flex-shrink: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-right: none; border-bottom: none;
+  border-radius: 7px 0 0 0;
+  color: var(--muted);
+  font-size: .8rem;
+  padding: 5px 7px 3px;
+  cursor: pointer;
+  line-height: 1;
+  margin-bottom: -1px;
+  z-index: 3;
+}
+#pdf-toolbar-toggle:hover { color: var(--text); }
+
+/* Hide action bar + choice bar when toolbar collapsed */
+.pdf-modal-inner.toolbar-hidden > #pdf-action-bar,
+.pdf-modal-inner.toolbar-hidden > #pdf-crop-choice-bar {
+  display: none;
 }
 .pdf-bar-sep {
   width: 1px; height: 22px; background: var(--border);
