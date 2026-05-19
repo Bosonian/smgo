@@ -228,6 +228,7 @@ function showScreen(name, msg = '', sub = '') {
   screenDone.style.display    = 'none';
   screenError.style.display   = 'none';
   cardArea.style.display      = 'none';
+  $('screen-library').style.display = 'none';
   $('action-area').style.display = 'none';
 
   if (name === 'loading') { screenLoading.style.display = 'flex'; }
@@ -240,6 +241,9 @@ function showScreen(name, msg = '', sub = '') {
   else if (name === 'review') {
     cardArea.style.display = 'flex';
     $('action-area').style.display = 'flex';
+  }
+  else if (name === 'library') {
+    $('screen-library').style.display = 'flex';
   }
 }
 
@@ -950,7 +954,7 @@ $('theme-toggle').addEventListener('click', () => {
 
 $('settings-icon').addEventListener('click', () => {
   const choice = prompt(
-    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n5) PDF folder (for PDF viewer)\n\nEnter number:',
+    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n5) PDF folder (for PDF viewer)\n6) PDF parent element ID (for library extracts)\n\nEnter number:',
   );
   if (choice === '1') {
     const url = prompt('SMGo server URL (e.g. http://192.168.1.x:3001)', getServerUrl());
@@ -979,6 +983,14 @@ $('settings-icon').addEventListener('click', () => {
     }
   } else if (choice === '5') {
     pickPdfFolder();
+  } else if (choice === '6') {
+    const current = localStorage.getItem('smgo_pdf_parent_id') || '';
+    const id = prompt('Parent element ID in SM for standalone PDF extracts\n(leave blank to clear):', current);
+    if (id !== null) {
+      if (id.trim() && /^\d+$/.test(id.trim())) localStorage.setItem('smgo_pdf_parent_id', id.trim());
+      else if (!id.trim()) localStorage.removeItem('smgo_pdf_parent_id');
+      else alert('Must be a numeric element ID.');
+    }
   }
 });
 
@@ -1317,6 +1329,11 @@ async function renderPdfPage(pageNum) {
   $('pdf-prev-btn').disabled        = pageNum <= 1;
   $('pdf-next-btn').disabled        = pageNum >= pdfViewerDoc.numPages;
 
+  // Persist reading position for library PDFs
+  if (pdfViewerCard?._fromLibrary && pdfViewerCard.pdfFilename) {
+    localStorage.setItem(`smgo_pdf_pos_${pdfViewerCard.pdfFilename}`, String(pageNum));
+  }
+
   // Clear any old text selection state
   $('pdf-extract-btn').style.display = 'none';
   $('pdf-sel-label').style.display   = 'none';
@@ -1358,10 +1375,11 @@ function extractFromPdf() {
   if (!text || !pdfViewerCard) return;
 
   const card = pdfViewerCard;
+  const libParentId = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
   const rec  = {
     id:          `pdfex-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     type:        'pdf-extract-create',
-    parentId:    card.pdfElementId || card.id,
+    parentId:    card.pdfElementId || libParentId || card.id,
     parentTitle: card.pdfFilename  || card.title,
     text,
     pdfPage:     pdfViewerPage - 1,  // store 0-indexed to match SM
@@ -1379,6 +1397,100 @@ function extractFromPdf() {
   // Immediate upload
   uploadExtract(rec);
 }
+
+// ── PDF Library ─────────────────────────────────────────────────────────────
+async function goToLibrary() {
+  showScreen('library');
+  await openLibrary();
+}
+
+function closeLibrary() {
+  if (idx < cards.length) { showScreen('review'); renderCard(); }
+  else if (cards.length > 0) { syncAndDone(); }
+  else { showScreen('loading'); init(); }
+}
+
+async function openLibrary() {
+  const listEl = $('library-list');
+  listEl.innerHTML = '<p class="lib-empty">Loading…</p>';
+
+  const dirHandle = await getPdfDirHandle();
+  if (!dirHandle) {
+    if (window.showDirectoryPicker) {
+      listEl.innerHTML = `<div class="lib-no-folder">
+        <p>No PDF folder set.</p>
+        <button id="lib-setup-folder-btn" class="primary-btn">Select PDF folder</button>
+      </div>`;
+      $('lib-setup-folder-btn').addEventListener('click', async () => {
+        const h = await pickPdfFolder();
+        if (h) openLibrary();
+      });
+    } else {
+      listEl.innerHTML = '<p class="lib-empty">File access not supported. Use Chrome or Edge.</p>';
+    }
+    return;
+  }
+
+  let pdfs = [];
+  try {
+    const perm = await dirHandle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') {
+      const granted = await dirHandle.requestPermission({ mode: 'read' });
+      if (granted !== 'granted') {
+        listEl.innerHTML = '<p class="lib-empty">Folder access denied.</p>';
+        return;
+      }
+    }
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf'))
+        pdfs.push(entry.name);
+    }
+  } catch (e) {
+    listEl.innerHTML = `<p class="lib-empty">Could not read folder: ${esc(e.message)}</p>`;
+    return;
+  }
+
+  pdfs.sort((a, b) => a.localeCompare(b));
+
+  if (!pdfs.length) {
+    listEl.innerHTML = '<p class="lib-empty">No PDF files found in this folder.</p>';
+    return;
+  }
+
+  listEl.innerHTML = pdfs.map(name => {
+    const page = localStorage.getItem(`smgo_pdf_pos_${name}`);
+    return `<div class="pdf-lib-item" data-name="${esc(name)}">
+      <div class="pdf-lib-name">${esc(name.replace(/\.pdf$/i, ''))}</div>
+      <div class="pdf-lib-meta">${page ? `Last page: ${page}` : 'Not started'}</div>
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.pdf-lib-item').forEach(el => {
+    el.addEventListener('click', () => openPdfFromLibrary(el.dataset.name));
+  });
+}
+
+function openPdfFromLibrary(filename) {
+  const parentId  = parseInt(localStorage.getItem('smgo_pdf_parent_id') || '0', 10);
+  const savedPage = parseInt(localStorage.getItem(`smgo_pdf_pos_${filename}`) || '1', 10) - 1;
+  openPdfViewer({
+    id:           0,
+    type:         'pdf-extract',
+    title:        filename.replace(/\.pdf$/i, ''),
+    pdfFilename:  filename,
+    pdfElementId: parentId || null,
+    pdfPage:      Math.max(0, savedPage),
+    _fromLibrary: true,
+  });
+}
+
+$('lib-btn').addEventListener('click', goToLibrary);
+$('done-library-btn').addEventListener('click', goToLibrary);
+$('lib-back-btn').addEventListener('click', closeLibrary);
+$('lib-pick-btn').addEventListener('click', async () => {
+  const h = await pickPdfFolder();
+  if (h) openLibrary();
+});
 
 // Wire up PDF modal buttons
 $('pdf-close-btn').addEventListener('click', closePdfViewer);

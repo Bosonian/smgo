@@ -128,7 +128,7 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v16` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Cache name: `smgo-v18` — **must bump on every meaningful deploy** or phone will serve stale JS.
 Shell: `['./','./index.html','./app.js','./style.css','./manifest.json','./icons/icon-192.png','./icons/icon-512.png']`
 
 ### Gemini Q&A

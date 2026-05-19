@@ -24,6 +24,7 @@
     <button id="extract-badge-btn" style="display:none" title="Pending extracts">
       ✂ <span id="extract-count">0</span>
     </button>
+    <button id="lib-btn" title="PDF Library">📚</button>
     <button id="typo-toggle" title="Reading settings">Aa</button>
     <button id="theme-toggle" title="Toggle theme">☀️</button>
     <span id="settings-icon" title="Settings">⚙</span>
@@ -90,6 +91,17 @@
     <p id="done-msg" style="color:var(--muted);font-size:.9rem"></p>
     <p id="done-sub" style="color:var(--muted);font-size:.8rem;margin-top:4px"></p>
     <button id="done-restart-btn" style="margin-top:16px;padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">Review again from start</button>
+    <button id="done-library-btn" style="padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">📚 Read PDFs</button>
+  </div>
+
+  <!-- PDF Library screen -->
+  <div id="screen-library" style="display:none">
+    <div id="library-header">
+      <button id="lib-back-btn">← Back</button>
+      <span>PDF Library</span>
+      <button id="lib-pick-btn">Change folder</button>
+    </div>
+    <div id="library-list"></div>
   </div>
 
   <!-- Review card area (injected by app.js) -->
