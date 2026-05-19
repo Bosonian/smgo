@@ -128,12 +128,12 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v11` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Cache name: `smgo-v12` — **must bump on every meaningful deploy** or phone will serve stale JS.
 Shell: `['./','./index.html','./app.js','./style.css','./manifest.json','./icons/icon-192.png','./icons/icon-512.png']`
 
 ### Gemini Q&A
 Probes 8 model variants in order, caches the first that works in `smgo_gemini_model`.
-Model list: `gemini-2.0-flash`, `gemini-2.0-flash-001`, `gemini-2.0-flash-exp`, `gemini-1.5-flash`, `gemini-1.5-flash-001`, `gemini-1.5-flash-latest`, `gemini-1.5-flash-8b`, `gemini-pro`
+Model list: `gemini-2.5-flash`, `gemini-2.5-flash-lite-preview-06-17`, `gemini-2.5-flash-preview-05-20`, `gemini-2.0-flash`, `gemini-1.5-flash`
 
 ---
 
