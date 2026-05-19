@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -62,6 +63,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
         try { ApplyPendingDismisses(); } catch { }
       });
 
+      // Export today's cards to Supabase after a short delay
+      Task.Delay(5000).ContinueWith(_ => RunExportCloud());
+
       StartHttpServer();
       StartFileWatchers();
       StartSupabasePoller();
@@ -102,6 +106,35 @@ namespace SuperMemoAssistant.Plugins.SMGo
           Serilog.Log.Information("SMGo Supabase sync enabled: {Url}", _supaUrl);
       }
       catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo failed to load config.json"); }
+    }
+
+    // ── Auto-export today's cards to Supabase ────────────────────────────────
+
+    private void RunExportCloud()
+    {
+      var scriptPath = Path.Combine(DataDir, "export-cloud.js");
+      if (!File.Exists(scriptPath)) return;
+      try
+      {
+        var psi = new ProcessStartInfo
+        {
+          FileName               = "cmd.exe",
+          Arguments              = $"/c node \"{scriptPath}\"",
+          WorkingDirectory       = DataDir,
+          UseShellExecute        = false,
+          CreateNoWindow         = true,
+          RedirectStandardOutput = true,
+          RedirectStandardError  = true,
+        };
+        using var proc = Process.Start(psi);
+        if (proc == null) return;
+        var output = proc.StandardOutput.ReadToEnd();
+        var error  = proc.StandardError.ReadToEnd();
+        proc.WaitForExit(30000);
+        if (!string.IsNullOrWhiteSpace(output)) Serilog.Log.Information("{Output}", output.Trim());
+        if (!string.IsNullOrWhiteSpace(error))  Serilog.Log.Warning("export-cloud stderr: {Error}", error.Trim());
+      }
+      catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo RunExportCloud failed"); }
     }
 
     // ── Supabase poller ───────────────────────────────────────────────────────

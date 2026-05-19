@@ -87,6 +87,9 @@ async function init() {
   showScreen('loading');
   loadExtracts();
 
+  // Supabase: try cloud cards first — works from any network
+  if (getSupabase() && await initFromSupabase()) return;
+
   if (isStaticMode()) {
     serverUrlWrap.textContent = 'GitHub Pages – offline-ready';
     await initStatic();
@@ -96,6 +99,30 @@ async function init() {
     await syncAllExtracts();
     await initServer();
   }
+}
+
+async function initFromSupabase() {
+  const supa = getSupabase();
+  if (!supa) return false;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch(
+      `${supa.url}/rest/v1/smgo_daily?date=eq.${today}&select=data`,
+      { headers: { apikey: supa.key, Authorization: `Bearer ${supa.key}` } }
+    );
+    if (!res.ok) return false;
+    const rows = await res.json();
+    if (!rows.length || !rows[0].data?.cards?.length) return false;
+    cards = rows[0].data.cards;
+    idx   = 0;
+    serverUrlWrap.textContent = `Supabase · ${cards.length} cards`;
+    loadStoredProgress();
+    showScreen('review');
+    renderCard();
+    await syncAllPending();
+    await syncAllExtracts();
+    return true;
+  } catch { return false; }
 }
 
 async function initStatic() {
@@ -373,18 +400,43 @@ async function syncAndDone() {
 
 async function pushTodayGrades() {
   if (grades.length === 0) return true;
-  try {
-    const res = await fetch(`${getServerUrl()}/api/grades`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: new Date().toISOString().slice(0,10), reviews: grades }),
-    });
-    if (res.ok) {
+
+  // Try Supabase first (works anywhere)
+  const supa = getSupabase();
+  if (supa) {
+    let allOk = true;
+    for (const g of grades) {
+      const ok = await supaUpsert('smgo_queue', {
+        id:      `grade-${g.elementId}-${g.timestamp}`,
+        type:    'grade',
+        payload: g,
+      });
+      if (!ok) allOk = false;
+    }
+    if (allOk) {
       const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
       localStorage.setItem(todayKey(), JSON.stringify({ ...prev, synced: true }));
+      return true;
     }
-    return res.ok;
-  } catch { return false; }
+  }
+
+  // Fallback: local server
+  if (!isStaticMode()) {
+    try {
+      const res = await fetch(`${getServerUrl()}/api/grades`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: new Date().toISOString().slice(0,10), reviews: grades }),
+      });
+      if (res.ok) {
+        const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
+        localStorage.setItem(todayKey(), JSON.stringify({ ...prev, synced: true }));
+      }
+      return res.ok;
+    } catch { return false; }
+  }
+
+  return false;
 }
 
 async function syncAllPending() {
