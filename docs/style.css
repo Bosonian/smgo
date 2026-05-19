@@ -215,7 +215,15 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 #extract-btn { position: relative; }
 
 /* Selectable text areas */
-.selectable { user-select: text; -webkit-user-select: text; cursor: text; }
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default; /* allow iOS long-press callout */
+  cursor: text;
+}
+
+/* Let the card scroll vertically without grabbing touch for other gestures */
+.card { touch-action: pan-y; }
 
 /* ── Extract flash confirmation ───────────── */
 .extract-flash {

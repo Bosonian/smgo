@@ -347,32 +347,46 @@ function updateExtractBadge() {
 
 // Floating toolbar: appears above text selection inside card body
 let selTimer = null;
-document.addEventListener('selectionchange', () => {
+function scheduleSelCheck(ms) {
   clearTimeout(selTimer);
-  selTimer = setTimeout(onSelectionChange, 250);
-});
+  selTimer = setTimeout(onSelectionChange, ms);
+}
+
+document.addEventListener('selectionchange', () => scheduleSelCheck(250));
+// touchend is more reliable on mobile — fire after finger lifts
+document.addEventListener('touchend', () => scheduleSelCheck(350), { passive: true });
 
 function onSelectionChange() {
-  const sel = window.getSelection();
+  const sel  = window.getSelection();
   const text = sel?.toString().trim() ?? '';
-  if (text.length < 5) { hideExtractToolbar(); return; }
+  if (text.length < 2) { hideExtractToolbar(); return; }
+  if (!sel.rangeCount)  { hideExtractToolbar(); return; }
 
-  // Only show when selection is inside .selectable
-  if (!sel.rangeCount) { hideExtractToolbar(); return; }
-  const anchor = sel.getRangeAt(0).commonAncestorContainer;
-  const node   = anchor instanceof Element ? anchor : anchor.parentElement;
-  if (!node?.closest('.selectable')) { hideExtractToolbar(); return; }
+  const range = sel.getRangeAt(0);
+  const inSelectable = n => {
+    const el = (n instanceof Element) ? n : n.parentElement;
+    return !!el?.closest('.selectable');
+  };
+  // check startContainer OR commonAncestor (cross-element selections differ)
+  if (!inSelectable(range.startContainer) && !inSelectable(range.commonAncestorContainer)) {
+    hideExtractToolbar(); return;
+  }
 
-  positionExtractToolbar(sel.getRangeAt(0));
+  positionExtractToolbar(range);
 }
 
 function positionExtractToolbar(range) {
-  const rect = range.getBoundingClientRect();
-  // Centre the toolbar horizontally over the selection, just above it
-  const cx = rect.left + rect.width / 2;
-  const ty = rect.top - 8;   // 8px gap above selection
-  extractToolbar.style.left = cx + 'px';
-  extractToolbar.style.top  = ty + 'px';
+  const rect  = range.getBoundingClientRect();
+  // clamp x so toolbar stays within viewport edges
+  const cx    = Math.max(60, Math.min(rect.left + rect.width / 2, window.innerWidth - 60));
+  const above = rect.top - 8;
+  const below = rect.bottom + 8;
+  // if selection is near the top (e.g. behind header), show toolbar below instead
+  const flip  = above < 60;
+
+  extractToolbar.style.left      = cx + 'px';
+  extractToolbar.style.top       = (flip ? below : above) + 'px';
+  extractToolbar.style.transform = flip ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
   extractToolbar.classList.add('visible');
 }
 function hideExtractToolbar() {
