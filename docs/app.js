@@ -1887,21 +1887,64 @@ function toggleImgCropMode() {
 (function wirePdfTextSelection() {
   const layer = $('pdf-text-layer');
 
+  // S Pen side button (button=2) on the text layer → select word under pen
   layer.addEventListener('pointerdown', e => {
-    if (_imgCropMode || e.button !== 0) return;
+    if (_imgCropMode) return;
+    if (e.pointerType === 'pen' && e.button === 2) {
+      const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (!caret) return;
+      const r = document.createRange();
+      r.selectNodeContents(caret.startContainer);
+      // shrink to word boundary
+      try {
+        const tmp = document.createRange();
+        tmp.setStart(caret.startContainer, caret.startOffset);
+        tmp.setEnd(caret.startContainer, caret.startOffset);
+        tmp.expand('word');
+        r.setStart(tmp.startContainer, tmp.startOffset);
+        r.setEnd(tmp.endContainer, tmp.endOffset);
+      } catch { r.setStart(caret.startContainer, caret.startOffset); r.collapse(true); }
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      scheduleSelCheck(100);
+      e.preventDefault();
+      return;
+    }
+    if (e.button !== 0) return;
     const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
     if (!caret) return;
-    _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
-    _pdfColDivX   = detectPdfColumnDivider();
-    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
-      e.preventDefault();                    // stop browser native selection
+    _pdfColDivX = detectPdfColumnDivider();
+    if (e.pointerType === 'mouse') {
+      // Mouse: capture immediately
+      _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset, captured: true };
+      e.preventDefault();
       window.getSelection()?.removeAllRanges();
       layer.setPointerCapture(e.pointerId);
+    } else if (e.pointerType === 'pen') {
+      // S Pen: record start pos but defer capture until we know direction (scroll vs select)
+      _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset,
+                        startX: e.clientX, startY: e.clientY, captured: false };
     }
   });
 
   layer.addEventListener('pointermove', e => {
-    if (!_pdfSelAnchor || (e.pointerType !== 'mouse' && e.pointerType !== 'pen') || !(e.buttons & 1)) return;
+    if (!_pdfSelAnchor || !(e.buttons & 1)) return;
+    if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
+
+    // S Pen deferred-capture: decide scroll vs select on first meaningful move
+    if (e.pointerType === 'pen' && !_pdfSelAnchor.captured) {
+      const dx = Math.abs(e.clientX - _pdfSelAnchor.startX);
+      const dy = Math.abs(e.clientY - _pdfSelAnchor.startY);
+      if (dx + dy < 6) return;                // not moved enough to decide yet
+      if (dy > dx * 1.4) { _pdfSelAnchor = null; return; } // vertical → let scroll through
+      // Diagonal/horizontal → commit to selection
+      _pdfSelAnchor.captured = true;
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      layer.setPointerCapture(e.pointerId);
+    }
+
     let tx = e.clientX;
     // Clamp x to the anchor's column so selection never jumps the gutter
     if (_pdfColDivX !== null) {
