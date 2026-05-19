@@ -582,6 +582,14 @@ document.addEventListener('touchend',   () => scheduleSelCheck(350), { passive: 
 // stylus lift — same delay as touch so the selection rect is settled
 document.addEventListener('pointerup',  e => { if (e.pointerType === 'pen') scheduleSelCheck(200); }, { passive: true });
 
+// S Pen hover detection — fires before the nib ever touches the screen.
+// Sets .pen-active on <html> once, suppressing the native long-press callout
+// so our JS selection takes effect immediately on first pen contact.
+window.addEventListener('pointermove', e => {
+  if (e.pointerType === 'pen')
+    document.documentElement.classList.add('pen-active');
+}, { once: true, passive: true });
+
 function onSelectionChange() {
   const sel  = window.getSelection();
   const text = sel?.toString().trim() ?? '';

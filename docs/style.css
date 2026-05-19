@@ -212,6 +212,13 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   cursor: text;
 }
 
+/* S Pen detected (class set on <html> on first pen hover, before any touch) —
+   suppress native long-press callout; pen pointerdown is always cancelable per
+   spec so touch-action is irrelevant for pen, but callout suppression matters. */
+.pen-active .selectable { -webkit-touch-callout: none; }
+.pen-active .textLayer  { -webkit-touch-callout: none; }
+.pen-active #card-area  { cursor: text; }
+
 /* Let the card scroll vertically without grabbing touch for other gestures */
 .card { touch-action: pan-y; }
 
