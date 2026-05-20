@@ -2072,17 +2072,11 @@ function penApplyDragSelection(anchor, ex, ey) {
   layer.addEventListener('pointermove', e => {
     if (!_pdfSelAnchor || e.buttons === 0) return;
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
-    let tx = e.clientX;
-    // Clamp x to the anchor's column so selection never jumps the gutter
-    if (_pdfColDivX !== null) {
-      const ar = _pdfSelAnchor.node.parentElement?.getBoundingClientRect();
-      if (ar) {
-        const ax = (ar.left + ar.right) / 2;
-        if (ax < _pdfColDivX) tx = Math.min(tx, _pdfColDivX - 4);
-        else                   tx = Math.max(tx, _pdfColDivX + 4);
-      }
-    }
-    penApplyDragSelection(_pdfSelAnchor, tx, e.clientY);
+    // No x-clamping — the column divider clamp was snapping tx to a fixed pixel
+    // position, causing caretRangeFromPoint to land on a wrong span and making
+    // selection jump erratically. _pdfColDivX is still used by getSelectionRects
+    // to filter highlight rects to one column after the fact.
+    penApplyDragSelection(_pdfSelAnchor, e.clientX, e.clientY);
   });
 
   layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; layer.classList.remove('pen-hover-select'); });
@@ -2380,6 +2374,27 @@ $('pdf-viewport').addEventListener('touchend', e => {
   else if (dx > 0 && pdfViewerPage > 1) renderPdfPage(pdfViewerPage - 1);
 }, { passive: true });
 $('pdf-viewport').addEventListener('touchcancel', () => { _touchSwipeStart = null; }, { passive: true });
+
+// Touch-scroll forwarder for #pdf-viewport when pen-active.
+// html.pen-active .textLayer { touch-action: none } stops the browser handling
+// scroll natively for touches starting on the text layer. We restore it manually.
+// Horizontal swipes (page-turn) are still handled by the existing touchend code above.
+{
+  const vp = $('pdf-viewport');
+  let _pdfTouchY = 0;
+  vp.addEventListener('touchstart', e => {
+    if (!document.documentElement.classList.contains('pen-active')) return;
+    if (e.touches[0].target?.closest?.('.textLayer')) _pdfTouchY = e.touches[0].clientY;
+  }, { passive: true });
+  vp.addEventListener('touchmove', e => {
+    if (!_pdfTouchY) return;
+    const dy = _pdfTouchY - e.touches[0].clientY;
+    _pdfTouchY = e.touches[0].clientY;
+    vp.scrollBy(0, dy);
+  }, { passive: true });
+  vp.addEventListener('touchend',    () => { _pdfTouchY = 0; }, { passive: true });
+  vp.addEventListener('touchcancel', () => { _pdfTouchY = 0; }, { passive: true });
+}
 
 // ── Toolbar collapse toggle ────────────────────────────────────────────────
 $('pdf-toolbar-toggle').addEventListener('click', () => {
