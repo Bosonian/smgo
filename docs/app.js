@@ -1542,6 +1542,7 @@ let _pdfStagedSegments    = [];
 let _pendingCropData      = null;
 let _pdfSelAnchor         = null; // { node, offset } — anchor for custom mouse selection
 let _pdfColDivX           = null; // detected column boundary (absolute x), or null
+let _pdfPenDownInGesture  = false; // S Pen fired pointerdown during current touch sequence
 
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -2063,6 +2064,7 @@ function penApplyDragSelection(anchor, ex, ey) {
     _pdfColDivX   = detectPdfColumnDivider();
     _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+      if (e.pointerType === 'pen') _pdfPenDownInGesture = true; // suppress swipe on touchend
       e.preventDefault();
       window.getSelection()?.removeAllRanges();
       layer.setPointerCapture(e.pointerId);
@@ -2358,22 +2360,29 @@ $('pdf-page-info').addEventListener('keydown', e => {
 });
 
 // ── Touch swipe to turn pages ──────────────────────────────────────────────
+// Samsung S Pen generates both pointer events AND touch events for the same gesture.
+// A pen selection drag (left→right) fires touchstart+touchend with dx > 60px, which
+// matches the swipe threshold and incorrectly navigates to the previous page.
+// Fix: reset _pdfPenDownInGesture on touchstart; if pen fired pointerdown during
+// this touch sequence, suppress swipe navigation on touchend.
 let _touchSwipeStart = null;
 $('pdf-viewport').addEventListener('touchstart', e => {
   if (e.touches.length !== 1) return;
+  _pdfPenDownInGesture = false; // reset at start of each touch sequence
   _touchSwipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 }, { passive: true });
 $('pdf-viewport').addEventListener('touchend', e => {
-  if (!_touchSwipeStart || _imgCropMode) return;
+  if (!_touchSwipeStart || _imgCropMode) { _touchSwipeStart = null; return; }
   const dx = e.changedTouches[0].clientX - _touchSwipeStart.x;
   const dy = e.changedTouches[0].clientY - _touchSwipeStart.y;
   _touchSwipeStart = null;
+  if (_pdfPenDownInGesture) { _pdfPenDownInGesture = false; return; } // pen drag — not a swipe
   // Require a clear horizontal swipe: >60px, more horizontal than vertical
   if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
   if (dx < 0 && pdfViewerDoc && pdfViewerPage < pdfViewerDoc.numPages) renderPdfPage(pdfViewerPage + 1);
   else if (dx > 0 && pdfViewerPage > 1) renderPdfPage(pdfViewerPage - 1);
 }, { passive: true });
-$('pdf-viewport').addEventListener('touchcancel', () => { _touchSwipeStart = null; }, { passive: true });
+$('pdf-viewport').addEventListener('touchcancel', () => { _touchSwipeStart = null; _pdfPenDownInGesture = false; }, { passive: true });
 
 // Touch-scroll forwarder for #pdf-viewport when pen-active.
 // html.pen-active .textLayer { touch-action: none } stops the browser handling
