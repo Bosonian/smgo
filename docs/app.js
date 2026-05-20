@@ -33,8 +33,11 @@ async function supaUpsert(table, row) {
   const supa = getSupabase();
   if (!supa) return false;
   try {
+    const ac = new AbortController();
+    const t  = setTimeout(() => ac.abort(), 10_000);
     const res = await fetch(`${supa.url}/rest/v1/${table}`, {
       method: 'POST',
+      signal: ac.signal,
       headers: {
         apikey: supa.key, Authorization: `Bearer ${supa.key}`,
         'Content-Type': 'application/json',
@@ -42,6 +45,7 @@ async function supaUpsert(table, row) {
       },
       body: JSON.stringify(row),
     });
+    clearTimeout(t);
     return res.ok;
   } catch { return false; }
 }
@@ -204,6 +208,22 @@ function localDate() {
 }
 function todayKey() { return 'smgo_progress_' + localDate(); }
 
+// Persistent cross-day dismiss store — survives session reloads.
+// Entries older than 30 days are pruned on load to keep storage bounded.
+const DISMISSED_KEY     = 'smgo_dismissed';
+const DISMISSED_TTL_MS  = 30 * 864e5;
+
+function loadDismissed() {
+  try {
+    const arr     = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
+    const cutoff  = Date.now() - DISMISSED_TTL_MS;
+    return arr.filter(d => new Date(d.timestamp).getTime() > cutoff);
+  } catch { return []; }
+}
+function saveDismissed(list) {
+  localStorage.setItem(DISMISSED_KEY, JSON.stringify(list));
+}
+
 function loadStoredProgress() {
   try {
     const saved = JSON.parse(localStorage.getItem(todayKey()) || '{}');
@@ -212,6 +232,7 @@ function loadStoredProgress() {
     const done = new Set([
       ...grades.map(g => g.elementId),
       ...dismisses.map(d => d.elementId),
+      ...loadDismissed().map(d => d.elementId),   // cross-day: filter cards dismissed on previous days
     ]);
     const next = cards.findIndex(c => !done.has(c.id));
     idx = next === -1 ? cards.length : next;
@@ -322,21 +343,13 @@ function dismissCard() {
   const rec = { elementId: card.id, timestamp: new Date().toISOString() };
   dismisses.push(rec);
   saveProgress();
+  // Persist cross-day with synced=false; polling retries until it lands
+  const dList = loadDismissed();
+  dList.push({ elementId: card.id, timestamp: rec.timestamp, synced: false });
+  saveDismissed(dList);
   showFlash('Dismissed');
-  // Route via Supabase first (works anywhere), fallback to local server
-  const supa = getSupabase();
-  if (supa) {
-    supaUpsert('smgo_queue', {
-      id:      `dismiss-${card.id}-${rec.timestamp}`,
-      type:    'dismiss',
-      payload: rec,
-    }).catch(() => {});
-  } else if (!isStaticMode()) {
-    fetch(`${getServerUrl()}/api/dismiss`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(rec),
-    }).catch(() => {});
-  }
+  // Attempt upload now; syncAllDismissed handles retry if offline
+  syncAllDismissed().catch(() => {});
   idx++;
   renderCard();
 }
@@ -478,7 +491,8 @@ async function syncAllPending() {
   }
   let total = 0;
   for (const k of keys) {
-    const saved = JSON.parse(localStorage.getItem(k) || '{}');
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(k) || '{}'); } catch { continue; }
     if (!saved.grades || !saved.grades.length || saved.synced) continue;
 
     // Try Supabase first (works anywhere)
@@ -517,6 +531,33 @@ async function syncAllPending() {
     }
   }
   if (total > 0) setSyncStatus(`✓ Synced ${total} pending grades`, 'ok');
+}
+
+async function syncAllDismissed() {
+  const list = loadDismissed();
+  let changed = false;
+  for (const d of list) {
+    if (d.synced) continue;
+    let ok = false;
+    const supa = getSupabase();
+    if (supa) {
+      ok = await supaUpsert('smgo_queue', {
+        id:      `dismiss-${d.elementId}-${d.timestamp}`,
+        type:    'dismiss',
+        payload: { elementId: d.elementId, timestamp: d.timestamp },
+      });
+    } else if (!isStaticMode()) {
+      try {
+        const res = await fetch(`${getServerUrl()}/api/dismiss`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elementId: d.elementId, timestamp: d.timestamp }),
+        });
+        ok = res.ok;
+      } catch {}
+    }
+    if (ok) { d.synced = true; changed = true; }
+  }
+  if (changed) saveDismissed(list);
 }
 
 async function trySyncPending() { await syncAllPending(); }
@@ -1920,24 +1961,15 @@ function penSelectWordAt(x, y) {
 }
 
 // Shared helper: apply a caret-range drag selection from a recorded anchor.
+// Uses setBaseAndExtent (Chrome/Safari/FF53+) which handles direction automatically
+// and is more reliable on Samsung Android than the manual Range approach.
 function penApplyDragSelection(anchor, ex, ey) {
   const end = document.caretRangeFromPoint(ex, ey);
   if (!end) return;
+  const sel = window.getSelection();
+  if (!sel) return;
   try {
-    const aRange = document.createRange();
-    aRange.setStart(anchor.node, anchor.offset);
-    aRange.collapse(true);
-    const r = document.createRange();
-    if (aRange.compareBoundaryPoints(Range.START_TO_START, end) <= 0) {
-      r.setStart(anchor.node, anchor.offset);
-      r.setEnd(end.startContainer, end.startOffset);
-    } else {
-      r.setStart(end.startContainer, end.startOffset);
-      r.setEnd(anchor.node, anchor.offset);
-    }
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(r);
+    sel.setBaseAndExtent(anchor.node, anchor.offset, end.startContainer, end.startOffset);
   } catch {}
 }
 
@@ -1959,14 +1991,17 @@ function penApplyDragSelection(anchor, ex, ey) {
     _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
       // Both mouse and S Pen capture immediately; pen never scrolls.
+      // touch-action:none during pen drag prevents Samsung from firing pointercancel
+      // when its touch-scroll heuristic triggers (which was capping selection at ~2 chars).
       e.preventDefault();
       window.getSelection()?.removeAllRanges();
+      if (e.pointerType === 'pen') layer.style.touchAction = 'none';
       layer.setPointerCapture(e.pointerId);
     }
   });
 
   layer.addEventListener('pointermove', e => {
-    if (!_pdfSelAnchor || !(e.buttons & 1)) return;
+    if (!_pdfSelAnchor || e.buttons === 0) return;
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
     let tx = e.clientX;
     // Clamp x to the anchor's column so selection never jumps the gutter
@@ -1981,8 +2016,8 @@ function penApplyDragSelection(anchor, ex, ey) {
     penApplyDragSelection(_pdfSelAnchor, tx, e.clientY);
   });
 
-  layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; });
-  layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; });
+  layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; layer.style.touchAction = ''; });
+  layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; layer.style.touchAction = ''; });
 })();
 
 // S Pen selection on the review card text area — mirrors PDF text layer behaviour.
@@ -2006,17 +2041,18 @@ function penApplyDragSelection(anchor, ex, ey) {
     if (!caret) return;
     e.preventDefault();
     window.getSelection()?.removeAllRanges();
+    area.style.touchAction = 'none';
     area.setPointerCapture(e.pointerId);
     cardAnchor = { node: caret.startContainer, offset: caret.startOffset };
   });
 
   area.addEventListener('pointermove', e => {
-    if (!cardAnchor || e.pointerType !== 'pen' || !(e.buttons & 1)) return;
+    if (!cardAnchor || e.pointerType !== 'pen' || e.buttons === 0) return;
     penApplyDragSelection(cardAnchor, e.clientX, e.clientY);
   });
 
-  area.addEventListener('pointerup',     () => { if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
-  area.addEventListener('pointercancel', () => { cardAnchor = null; });
+  area.addEventListener('pointerup',     () => { area.style.touchAction = ''; if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
+  area.addEventListener('pointercancel', () => { area.style.touchAction = ''; cardAnchor = null; });
 })();
 
 async function renderCropToDataUrl(crop) {
@@ -2372,29 +2408,37 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Supabase background polling ────────────────────────────────────────────
-let _pollTimer = null;
+let _pollTimer    = null;
+let _pollInFlight = false;   // reentrancy guard — prevents tick overlap on slow networks
 const POLL_INTERVAL_MS = 30_000;
 
 async function _pollTick() {
-  if (!getSupabase()) return;
-  await syncAllPending();
-  await syncAllExtracts();
+  if (_pollInFlight || !getSupabase()) return;
+  _pollInFlight = true;
+  try {
+    await syncAllPending();
+    await syncAllExtracts();
+    await syncAllDismissed();
+  } catch {}
+  finally { _pollInFlight = false; }
 }
 
+// _startPolling only starts the interval — no immediate tick here.
+// init() handles the first sync at startup; visibilitychange handles restore.
 function _startPolling() {
   if (_pollTimer) return;
-  _pollTick();
   _pollTimer = setInterval(_pollTick, POLL_INTERVAL_MS);
 }
 
-function _stopPolling() {
-  clearInterval(_pollTimer);
-  _pollTimer = null;
-}
+function _stopPolling() { clearInterval(_pollTimer); _pollTimer = null; }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') _startPolling();
-  else _stopPolling();
+  if (document.visibilityState === 'visible') {
+    _pollTick();      // sync immediately on restore from background
+    _startPolling();  // then resume the interval
+  } else {
+    _stopPolling();
+  }
 });
 if (document.visibilityState === 'visible') _startPolling();
 
