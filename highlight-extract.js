@@ -87,11 +87,13 @@ function saveState(state) {
 }
 
 // ── Color classification ───────────────────────────────────────────────────
-// pdfjs annotation colors are [r, g, b] each in range 0–1.
+// pdfjs annotation colors: 0–1 floats (standard) or 0–255 integers (Xodo TypedArray).
 
 function classifyColor(color) {
   if (!color || color.length < 3) return 'other';
-  const [r, g, b] = color;
+  let [r, g, b] = color;
+  // Normalize 0–255 integers to 0–1
+  if (r > 1 || g > 1 || b > 1) { r /= 255; g /= 255; b /= 255; }
   // Green: dominant G, low R and B
   if (g > 0.5 && r < 0.5 && b < 0.5)        return 'green';
   // Blue/cyan: dominant B, low R
@@ -130,13 +132,26 @@ function getElementId(pdfPath) {
   return Number.isInteger(id) && String(id) === base ? id : null;
 }
 
-// flat quadPoints [x0,y0,x1,y1,x2,y2,x3,y3, ...] → array of bounding rects
+// quadPoints → array of bounding rects.
+// Handles two formats pdfjs may return:
+//   standard : flat number array  [x0,y0,x1,y1,x2,y2,x3,y3, ...]  (8 per quad)
+//   Xodo     : array of [{x,y}×4] quads
 function quadPointsToRects(quadPoints) {
   const rects = [];
-  for (let i = 0; i + 7 < quadPoints.length; i += 8) {
-    const xs = [quadPoints[i], quadPoints[i+2], quadPoints[i+4], quadPoints[i+6]];
-    const ys = [quadPoints[i+1], quadPoints[i+3], quadPoints[i+5], quadPoints[i+7]];
-    rects.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+  if (quadPoints.length > 0 && Array.isArray(quadPoints[0])) {
+    // Xodo format: [[{x,y},{x,y},{x,y},{x,y}], ...]
+    for (const quad of quadPoints) {
+      const xs = quad.map(p => p.x);
+      const ys = quad.map(p => p.y);
+      rects.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+    }
+  } else {
+    // Standard flat number array
+    for (let i = 0; i + 7 < quadPoints.length; i += 8) {
+      const xs = [quadPoints[i], quadPoints[i+2], quadPoints[i+4], quadPoints[i+6]];
+      const ys = [quadPoints[i+1], quadPoints[i+3], quadPoints[i+5], quadPoints[i+7]];
+      rects.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+    }
   }
   return rects;
 }
@@ -173,7 +188,14 @@ function cleanText(raw) {
 
 // Stable ID for a single highlight
 function highlightId(relPath, pageIndex, quadPoints, text) {
-  const rounded = Array.from(quadPoints).map(v => Math.round(v * 10) / 10);
+  // Normalize both quadPoints formats to a flat number array for stable hashing
+  let flat;
+  if (quadPoints.length > 0 && Array.isArray(quadPoints[0])) {
+    flat = quadPoints.flatMap(quad => quad.flatMap(p => [p.x, p.y]));
+  } else {
+    flat = Array.from(quadPoints);
+  }
+  const rounded = flat.map(v => Math.round(v * 10) / 10);
   return 'hl-' + crypto.createHash('sha1')
     .update(JSON.stringify({ p: relPath, pg: pageIndex, q: rounded, t: text }))
     .digest('hex').slice(0, 16);
@@ -303,9 +325,10 @@ async function run() {
 
       // Sort highlights in reading order (top→bottom, left→right) before processing
       highlights.sort((a, b) => {
-        const ay = Math.max(...Array.from(a.quadPoints).filter((_, i) => i % 2 === 1));
-        const by = Math.max(...Array.from(b.quadPoints).filter((_, i) => i % 2 === 1));
-        return by - ay || a.rect[0] - b.rect[0];
+        const topY = qp => Array.isArray(qp[0])
+          ? Math.max(...qp.flatMap(q => q.map(p => p.y)))
+          : Math.max(...Array.from(qp).filter((_, i) => i % 2 === 1));
+        return topY(b.quadPoints) - topY(a.quadPoints) || a.rect[0] - b.rect[0];
       });
 
       for (const annot of highlights) {
@@ -365,7 +388,7 @@ async function run() {
       console.log(`  ${relPath}: ${stagingBuffer.length} orange highlight(s) still staged (add a 🟢 green to commit)`);
     }
 
-    if (!pageError) {
+    if (!pageError && !DRY_RUN) {
       state[relPath] = { mtime };
       saveState(state);
     }
