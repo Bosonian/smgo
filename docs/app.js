@@ -650,13 +650,37 @@ document.addEventListener('touchend',   () => scheduleSelCheck(350), { passive: 
 // stylus lift — same delay as touch so the selection rect is settled
 document.addEventListener('pointerup',  e => { if (e.pointerType === 'pen') scheduleSelCheck(200); }, { passive: true });
 
-// S Pen hover detection — fires before the nib ever touches the screen.
-// Sets .pen-active on <html> once, suppressing the native long-press callout
-// so our JS selection takes effect immediately on first pen contact.
-window.addEventListener('pointermove', e => {
-  if (e.pointerType === 'pen')
-    document.documentElement.classList.add('pen-active');
-}, { once: true, passive: true });
+// S Pen mode: set html.pen-active on first pen contact or hover.
+// CSS keys off this to set touch-action:none on .card (so Samsung's compositor
+// never claims pen drags as scroll). Fired on pointermove (hover, before contact)
+// AND pointerdown capture (belt-and-suspenders for devices that skip hover events).
+// Once set, pen-active is permanent — S25 Ultra always has the pen.
+function _activatePenMode() {
+  if (document.documentElement.classList.contains('pen-active')) return;
+  document.documentElement.classList.add('pen-active');
+  _wireTouchScrollForCard();
+}
+// Manual finger-scroll forwarder: needed because touch-action:none on .card
+// (set via .pen-active .card CSS) prevents the browser from handling scroll natively.
+// Touch events still fire — we just forward them to .card-body manually.
+function _wireTouchScrollForCard() {
+  const area = $('card-area');
+  if (!area || area._penScrollWired) return;
+  area._penScrollWired = true;
+  let _ty = 0;
+  area.addEventListener('touchstart', e => { _ty = e.touches[0].clientY; }, { passive: true });
+  area.addEventListener('touchmove', e => {
+    const body = area.querySelector('.card-body');
+    if (!body) return;
+    const dy = _ty - e.touches[0].clientY;
+    _ty = e.touches[0].clientY;
+    body.scrollBy(0, dy);
+  }, { passive: true });
+}
+window.addEventListener('pointermove', e => { if (e.pointerType === 'pen') _activatePenMode(); }, { passive: true });
+// capture:true fires before element handlers — ensures pen-active CSS is set even when
+// hover events were not generated before this pointerdown
+window.addEventListener('pointerdown', e => { if (e.pointerType === 'pen') _activatePenMode(); }, { passive: true, capture: true });
 
 function onSelectionChange() {
   const sel  = window.getSelection();
@@ -2001,7 +2025,10 @@ function wirePenHoverGate(el) {
   };
   el.addEventListener('pointerover',  add, { passive: true });
   el.addEventListener('pointerenter', add, { passive: true });
-  el.addEventListener('pointerout',   rem, { passive: true });
+  // pointerout is NOT registered — it bubbles from child elements and would
+  // flicker the class off as the pen moves between child spans, removing
+  // touch-action:none exactly when pointerdown can sneak through without it.
+  // pointerleave does not bubble so it only fires when pen truly leaves the element.
   el.addEventListener('pointerleave', rem, { passive: true });
 }
 
@@ -2062,45 +2089,20 @@ function penApplyDragSelection(anchor, ex, ey) {
   layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; layer.classList.remove('pen-hover-select'); });
 })();
 
-// S Pen selection on the review card text area — mirrors PDF text layer behaviour.
-// Finger scroll/swipe on the card area is unaffected (touch events only).
-(function wirePenCardSelection() {
-  const area = $('card-area');
-  let cardAnchor = null;
-  wirePenHoverGate(area);  // sets touch-action:none via CSS before pointerdown fires
-
-  area.addEventListener('pointerdown', e => {
-    if (e.pointerType !== 'pen') return;
-    // Side button → instant word select + toolbar (works anywhere in the card)
-    if (e.button === 2) {
+// Card text selection: handled natively by Samsung's S Pen selection engine.
+// html.pen-active .card { touch-action: none } (CSS) prevents Samsung's compositor
+// from claiming pen drags as scroll, so the S Pen can drag-select freely.
+// The existing selectionchange → scheduleSelCheck pipeline shows the toolbar.
+// S Pen barrel button still works for word-select via the pointerdown handler below.
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'pen' && e.button === 2) {
+    // Side button: word select anywhere in the card
+    if (e.target.closest('#card-area')) {
       penSelectWordAt(e.clientX, e.clientY);
       e.preventDefault();
-      return;
     }
-    if (e.button !== 0) return;
-    // Only activate inside selectable text, not on buttons/badges
-    if (!e.target.closest('.selectable')) return;
-    const caret = document.caretRangeFromPoint(e.clientX, e.clientY);
-    if (!caret) return;
-    e.preventDefault();
-    window.getSelection()?.removeAllRanges();
-    area.setPointerCapture(e.pointerId);
-    cardAnchor = { node: caret.startContainer, offset: caret.startOffset };
-  }, { passive: false });
-
-  area.addEventListener('pointermove', e => {
-    if (!cardAnchor || e.pointerType !== 'pen' || e.buttons === 0) return;
-    // Clamp coordinates to area bounds — pointer capture keeps events flowing
-    // even when pen moves outside the element
-    const r  = area.getBoundingClientRect();
-    const cx = Math.max(r.left + 1, Math.min(e.clientX, r.right  - 1));
-    const cy = Math.max(r.top  + 1, Math.min(e.clientY, r.bottom - 1));
-    penApplyDragSelection(cardAnchor, cx, cy);
-  });
-
-  area.addEventListener('pointerup',     () => { area.classList.remove('pen-hover-select'); if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
-  area.addEventListener('pointercancel', () => { area.classList.remove('pen-hover-select'); cardAnchor = null; });
-})();
+  }
+}, { passive: false });
 
 async function renderCropToDataUrl(crop) {
   if (!pdfViewerDoc) return null;

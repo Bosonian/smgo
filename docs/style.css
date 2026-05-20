@@ -212,13 +212,20 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   cursor: text;
 }
 
-/* S Pen detected (class set on <html> on first pen hover) — suppress native long-press callout. */
+/* S Pen detected — suppress native long-press callout. */
 .pen-active .selectable { -webkit-touch-callout: none; }
 .pen-active .textLayer  { -webkit-touch-callout: none; }
 .pen-active #card-area  { cursor: text; }
 
 /* Let the card scroll vertically without grabbing touch for other gestures */
 .card { touch-action: pan-y; }
+
+/* Once a pen is detected (permanent on S Pen devices), disable touch-action on
+   the card so Samsung's compositor never claims pen drags as scroll gestures.
+   Finger touch scroll on .card-body is forwarded manually by _wireTouchScrollForCard().
+   Also disables it on .textLayer so PDF pen selection works without pointercancel. */
+html.pen-active .card      { touch-action: none !important; }
+html.pen-active .textLayer { touch-action: none !important; }
 
 /* pen-hover-select: added by JS on pointerover/pointerenter when pointerType==='pen'.
    Chromium latches touch-action from CSS at gesture-start (compositor thread), BEFORE
