@@ -803,7 +803,7 @@ mark.extracted-mark {
 .pdf-lib-item:active, .pdf-lib-item:hover { background: var(--surface2); }
 .pdf-lib-name {
   font-size: .9rem; font-weight: 500; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  word-break: break-word;
   min-width: 0;
 }
 .pdf-lib-meta {

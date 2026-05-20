@@ -209,16 +209,22 @@ function localDate() {
 function todayKey() { return 'smgo_progress_' + localDate(); }
 
 // Persistent cross-day dismiss store — survives session reloads.
-// Entries older than 30 days are pruned on load to keep storage bounded.
-const DISMISSED_KEY     = 'smgo_dismissed';
-const DISMISSED_TTL_MS  = 30 * 864e5;
+const DISMISSED_KEY    = 'smgo_dismissed';
+const DISMISSED_TTL_MS = 365 * 864e5;  // 1 year — generous, unsynced entries are never pruned
 
+// Raw store — never filtered. Use this any time you intend to write back.
+function loadDismissedRaw() {
+  try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); }
+  catch { return []; }
+}
+// Filtered view for read-only consumers (the done set).
+// Only prunes entries that are BOTH synced AND older than TTL — unsynced entries
+// are kept forever so SM always gets the dismiss even after weeks offline.
 function loadDismissed() {
-  try {
-    const arr     = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
-    const cutoff  = Date.now() - DISMISSED_TTL_MS;
-    return arr.filter(d => new Date(d.timestamp).getTime() > cutoff);
-  } catch { return []; }
+  const cutoff = Date.now() - DISMISSED_TTL_MS;
+  return loadDismissedRaw().filter(d =>
+    !d.synced || new Date(d.timestamp).getTime() > cutoff
+  );
 }
 function saveDismissed(list) {
   localStorage.setItem(DISMISSED_KEY, JSON.stringify(list));
@@ -229,12 +235,13 @@ function loadStoredProgress() {
     const saved = JSON.parse(localStorage.getItem(todayKey()) || '{}');
     grades    = saved.grades    || [];
     dismisses = saved.dismisses || [];
+    const norm = v => String(v);
     const done = new Set([
-      ...grades.map(g => g.elementId),
-      ...dismisses.map(d => d.elementId),
-      ...loadDismissed().map(d => d.elementId),   // cross-day: filter cards dismissed on previous days
+      ...grades.map(g => norm(g.elementId)),
+      ...dismisses.map(d => norm(d.elementId)),
+      ...loadDismissed().map(d => norm(d.elementId)),
     ]);
-    const next = cards.findIndex(c => !done.has(c.id));
+    const next = cards.findIndex(c => !done.has(norm(c.id)));
     idx = next === -1 ? cards.length : next;
   } catch { grades = []; dismisses = []; }
 }
@@ -343,8 +350,8 @@ function dismissCard() {
   const rec = { elementId: card.id, timestamp: new Date().toISOString() };
   dismisses.push(rec);
   saveProgress();
-  // Persist cross-day with synced=false; polling retries until it lands
-  const dList = loadDismissed();
+  // Persist cross-day — use raw store so we never drop old-but-unsynced entries
+  const dList = loadDismissedRaw();
   dList.push({ elementId: card.id, timestamp: rec.timestamp, synced: false });
   saveDismissed(dList);
   showFlash('Dismissed');
@@ -533,31 +540,51 @@ async function syncAllPending() {
   if (total > 0) setSyncStatus(`✓ Synced ${total} pending grades`, 'ok');
 }
 
+let _syncDismissInFlight = false;
+
 async function syncAllDismissed() {
-  const list = loadDismissed();
-  let changed = false;
-  for (const d of list) {
-    if (d.synced) continue;
-    let ok = false;
-    const supa = getSupabase();
-    if (supa) {
-      ok = await supaUpsert('smgo_queue', {
-        id:      `dismiss-${d.elementId}-${d.timestamp}`,
-        type:    'dismiss',
-        payload: { elementId: d.elementId, timestamp: d.timestamp },
-      });
-    } else if (!isStaticMode()) {
-      try {
-        const res = await fetch(`${getServerUrl()}/api/dismiss`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ elementId: d.elementId, timestamp: d.timestamp }),
+  if (_syncDismissInFlight) return;
+  _syncDismissInFlight = true;
+  try {
+    // Snapshot only the keys to attempt; don't hold the array across awaits.
+    const pending = loadDismissedRaw().filter(d => !d.synced);
+    const syncedKeys = new Set();  // `${elementId}|${timestamp}`
+
+    for (const d of pending) {
+      let ok = false;
+      const supa = getSupabase();
+      if (supa) {
+        ok = await supaUpsert('smgo_queue', {
+          id:      `dismiss-${d.elementId}-${d.timestamp}`,
+          type:    'dismiss',
+          payload: { elementId: d.elementId, timestamp: d.timestamp },
         });
-        ok = res.ok;
-      } catch {}
+      } else if (!isStaticMode()) {
+        try {
+          const res = await fetch(`${getServerUrl()}/api/dismiss`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ elementId: d.elementId, timestamp: d.timestamp }),
+          });
+          ok = res.ok;
+        } catch {}
+      }
+      if (ok) syncedKeys.add(`${d.elementId}|${d.timestamp}`);
     }
-    if (ok) { d.synced = true; changed = true; }
+
+    if (!syncedKeys.size) return;
+    // Re-read raw store right before writing — preserves any dismisses that
+    // arrived via dismissCard() during our awaits above.
+    const fresh = loadDismissedRaw();
+    let mutated = false;
+    for (const d of fresh) {
+      if (!d.synced && syncedKeys.has(`${d.elementId}|${d.timestamp}`)) {
+        d.synced = true; mutated = true;
+      }
+    }
+    if (mutated) saveDismissed(fresh);
+  } finally {
+    _syncDismissInFlight = false;
   }
-  if (changed) saveDismissed(list);
 }
 
 async function trySyncPending() { await syncAllPending(); }
