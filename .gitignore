@@ -9,3 +9,4 @@ SMAPlugin/obj/
 pwa/
 *.applied.json
 config.json
+highlight-extract-state.json

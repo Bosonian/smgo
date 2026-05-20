@@ -65,8 +65,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
         try { ApplyPendingDismisses(); } catch { }
       });
 
-      // Export today's cards to Supabase after a short delay
-      Task.Delay(5000).ContinueWith(_ => RunExportCloud());
+      // Export today's cards and extract new PDF highlights to Supabase
+      Task.Delay(5000).ContinueWith(_ => { RunExportCloud(); RunHighlightExtract(); });
 
       StartHttpServer();
       StartFileWatchers();
@@ -137,6 +137,33 @@ namespace SuperMemoAssistant.Plugins.SMGo
         if (!string.IsNullOrWhiteSpace(error))  Serilog.Log.Warning("export-cloud stderr: {Error}", error.Trim());
       }
       catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo RunExportCloud failed"); }
+    }
+
+    private void RunHighlightExtract()
+    {
+      var scriptPath = Path.Combine(DataDir, "highlight-extract.js");
+      if (!File.Exists(scriptPath)) return;
+      try
+      {
+        var psi = new ProcessStartInfo
+        {
+          FileName               = "cmd.exe",
+          Arguments              = $"/c node \"{scriptPath}\"",
+          WorkingDirectory       = DataDir,
+          UseShellExecute        = false,
+          CreateNoWindow         = true,
+          RedirectStandardOutput = true,
+          RedirectStandardError  = true,
+        };
+        using var proc = Process.Start(psi);
+        if (proc == null) return;
+        var output = proc.StandardOutput.ReadToEnd();
+        var error  = proc.StandardError.ReadToEnd();
+        proc.WaitForExit(60000);
+        if (!string.IsNullOrWhiteSpace(output)) Serilog.Log.Information("{Output}", output.Trim());
+        if (!string.IsNullOrWhiteSpace(error))  Serilog.Log.Warning("highlight-extract stderr: {Error}", error.Trim());
+      }
+      catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo RunHighlightExtract failed"); }
     }
 
     // ── Supabase poller ───────────────────────────────────────────────────────
