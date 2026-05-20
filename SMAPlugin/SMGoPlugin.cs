@@ -267,10 +267,20 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var sentence = p["sentence"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
       if (string.IsNullOrWhiteSpace(sentence)) return false;
-      var blanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
+
+      // Question side: replace [word] with [...] in blue
+      var qBlanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
         _ => "<span style=\"color:blue\">[...]</span>");
-      var html    = $"<span style=\"color:#231F20\">{blanked}</span>";
-      var builder = new ElementBuilder(ElementType.Item, new TextContent(true, html))
+      var qHtml = $"<span style=\"color:#231F20\">{qBlanked}</span>";
+
+      // Answer side: reveal blanked words in red — only shown after "Show Answer"
+      var aBlanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
+        m => $"<span style=\"color:red\">{WebUtility.HtmlEncode(m.Groups[1].Value)}</span>");
+      var aHtml = $"<span style=\"color:#231F20\">{aBlanked}</span>";
+
+      var qContent = new TextContent(true, qHtml);
+      var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
+      var builder  = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
       return true;
@@ -348,14 +358,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       if (elementId <= 0) return false;
-      // Done() triggers a confirmation dialog when called outside a review session,
-      // causing SM to crash when multiple dismiss items are queued. Grade 5 (Bright)
-      // works silently and schedules the element far in the future.
-      Svc.SM.UI.ElementWdw.GoToElement(elementId);
-      Thread.Sleep(400);
-      Svc.SM.UI.ElementWdw.AssignGrade(5);
-      Thread.Sleep(200);
-      return true;
+      // IElement.Done() calls the SM engine directly (bypasses the UI window),
+      // so no confirmation dialog fires. This marks the element Dismissed and
+      // removes it from the Outstanding queue permanently — equivalent to SM's Ignore.
+      var element = Svc.SM.Registry.Element[elementId];
+      if (element == null) return false;
+      return element.Done();
     }
 
     private bool ApplyOneEdit(JObject p)
