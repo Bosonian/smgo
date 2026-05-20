@@ -186,10 +186,29 @@ function buildCardFromHtml(id, filePath) {
   return { id, type: 'topic', title, body: text.slice(0, 10000) };
 }
 
+// Read priority.sub — flat array of uint32 element IDs ordered by priority rank.
+// Position = priority rank, so priority% = index / total × 100 (lower = higher priority).
+function getPriorityMap() {
+  const subFile = path.join(INFO_DIR, 'priority.sub');
+  if (!fs.existsSync(subFile)) return new Map();
+  const buf   = fs.readFileSync(subFile);
+  const total = Math.floor(buf.length / 4);
+  const map   = new Map();
+  for (let i = 0; i < total; i++)
+    map.set(buf.readUInt32LE(i * 4), Math.round(i * 100 / total));
+  return map;
+}
+
 // Return all outstanding cards for today — renderable types only
 function getTodayCards() {
-  const ids = getOutstandingIds();
-  return ids.map(buildCard).filter(c =>
+  const ids         = getOutstandingIds();
+  const priorityMap = getPriorityMap();
+  return ids.map(id => {
+    const card = buildCard(id);
+    const p = priorityMap.get(id);
+    if (p !== undefined) card.priority = p;
+    return card;
+  }).filter(c =>
     c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'cloze' || c.type === 'image'
   );
 }

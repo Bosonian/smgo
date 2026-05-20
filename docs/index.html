@@ -122,6 +122,7 @@
       <button id="skip-btn" class="secondary-btn">Skip →</button>
       <button id="pdf-open-btn" class="secondary-btn" style="display:none">📄 PDF</button>
       <button id="edit-btn" class="secondary-btn" style="display:none">✏ Note</button>
+      <button id="priority-btn" class="secondary-btn" style="display:none" title="Set priority in SM">P: –</button>
       <button id="dismiss-btn" class="secondary-btn dismiss-btn" style="display:none">Dismiss</button>
     </div>
     <div id="sync-status"></div>
@@ -234,6 +235,35 @@
         <button id="pdf-qa-btn"      class="pdf-act-btn" title="Generate Q&amp;A"        disabled>🤖</button>
         <button id="pdf-img-btn"     class="pdf-act-btn" title="Extract image region">🖼</button>
         <button id="pdf-mark-btn"    class="pdf-act-btn" title="Mark page as read">◉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Priority modal -->
+  <div id="priority-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span>Set Priority</span>
+        <button id="priority-modal-close">✕</button>
+      </div>
+      <div class="priority-modal-body">
+        <p class="priority-hint">Lower % = higher priority (SM shows it more often)</p>
+        <div class="priority-presets">
+          <button class="prio-preset" data-pct="5">🔥 Top<br><small>5%</small></button>
+          <button class="prio-preset" data-pct="20">↑ High<br><small>20%</small></button>
+          <button class="prio-preset" data-pct="50">Normal<br><small>50%</small></button>
+          <button class="prio-preset" data-pct="80">↓ Low<br><small>80%</small></button>
+        </div>
+        <div class="priority-slider-row">
+          <span class="priority-slider-label">Custom:</span>
+          <input type="range" id="priority-slider" min="0" max="100" step="1">
+          <span id="priority-value-display" class="priority-value">–</span>
+        </div>
+        <p class="priority-note">Changes take effect next time SM generates the daily queue.</p>
+      </div>
+      <div class="modal-footer">
+        <button id="priority-cancel-btn" class="secondary-btn">Cancel</button>
+        <button id="priority-set-btn" class="primary-btn">Set Priority</button>
       </div>
     </div>
   </div>

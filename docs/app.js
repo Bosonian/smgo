@@ -309,9 +309,16 @@ function renderCard() {
     bodyHtml = `<div class="card-body" style="color:var(--muted)">No renderable content.</div>`;
   }
 
+  const prioClass = c.priority <= 20 ? 'prio-high' : c.priority <= 50 ? 'prio-mid' : 'prio-low';
+  const prioBadge = c.priority !== undefined
+    ? `<span class="priority-badge ${prioClass}">${c.priority}%</span>` : '';
+
   cardArea.innerHTML = `
     <div class="card">
-      <span class="card-type-badge ${badgeClass}">${typeLabel[c.type] || c.type}</span>
+      <div class="card-top-row">
+        <span class="card-type-badge ${badgeClass}">${typeLabel[c.type] || c.type}</span>
+        ${prioBadge}
+      </div>
       <div class="card-title">${esc(c.title)}</div>
       ${bodyHtml}
     </div>`;
@@ -323,6 +330,10 @@ function renderCard() {
   $('dismiss-btn').style.display  = isDismissable ? 'inline-flex' : 'none';
   $('edit-btn').style.display     = (getSupabase() || !isStaticMode()) ? 'inline-flex' : 'none';
   $('pdf-open-btn').style.display = c.type === 'pdf-extract' ? 'inline-flex' : 'none';
+  const showPrio = getSupabase() && c.priority !== undefined;
+  const prioBtn  = $('priority-btn');
+  prioBtn.style.display = showPrio ? 'inline-flex' : 'none';
+  if (showPrio) prioBtn.textContent = `P: ${c.priority}%`;
 
   if (c.type === 'cloze') {
     revealBtn.textContent = 'Reveal Answer';
@@ -364,6 +375,69 @@ function showGrades() {
   revealBtn.style.display = 'none';
   gradeRow.style.display  = 'grid';
 }
+
+// ── Priority ───────────────────────────────────────────────────────────────
+let _pendingPriority = null; // priority value staged in the modal
+
+function openPriorityModal() {
+  const card = cards[idx];
+  if (!card) return;
+  _pendingPriority = card.priority !== undefined ? card.priority : 50;
+  const slider  = $('priority-slider');
+  const display = $('priority-value-display');
+  slider.value  = _pendingPriority;
+  display.textContent = _pendingPriority + '%';
+  // Highlight matching preset if any
+  document.querySelectorAll('.prio-preset').forEach(b => {
+    b.classList.toggle('selected', parseInt(b.dataset.pct) === _pendingPriority);
+  });
+  $('priority-modal').classList.add('open');
+}
+
+async function applyPriority() {
+  const card = cards[idx];
+  if (!card || _pendingPriority === null) return;
+  const pct = _pendingPriority;
+  $('priority-modal').classList.remove('open');
+  // Update local card data so badge refreshes immediately
+  card.priority = pct;
+  renderCard();
+  const supa = getSupabase();
+  if (supa) {
+    await supaUpsert('smgo_queue', {
+      id:      `priority-${card.id}-${Date.now()}`,
+      type:    'priority',
+      payload: { elementId: card.id, priority: pct },
+    });
+  }
+  showFlash(`Priority set to ${pct}%`);
+}
+
+(function wirePriorityModal() {
+  $('priority-btn').addEventListener('click', openPriorityModal);
+  $('priority-modal-close').addEventListener('click', () => $('priority-modal').classList.remove('open'));
+  $('priority-cancel-btn').addEventListener('click', () => $('priority-modal').classList.remove('open'));
+  $('priority-set-btn').addEventListener('click', applyPriority);
+
+  const slider  = $('priority-slider');
+  const display = $('priority-value-display');
+  slider.addEventListener('input', () => {
+    _pendingPriority = parseInt(slider.value);
+    display.textContent = _pendingPriority + '%';
+    document.querySelectorAll('.prio-preset').forEach(b =>
+      b.classList.toggle('selected', parseInt(b.dataset.pct) === _pendingPriority));
+  });
+
+  document.querySelectorAll('.prio-preset').forEach(b => {
+    b.addEventListener('click', () => {
+      _pendingPriority = parseInt(b.dataset.pct);
+      slider.value     = _pendingPriority;
+      display.textContent = _pendingPriority + '%';
+      document.querySelectorAll('.prio-preset').forEach(p =>
+        p.classList.toggle('selected', p === b));
+    });
+  });
+})();
 function esc(s) {
   if (!s) return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

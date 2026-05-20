@@ -194,6 +194,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
               case "cloze":               applied = ApplyOneCloze(payload);          break;
               case "grade":               applied = ApplyOneGrade(payload);          break;
               case "dismiss":             applied = ApplyOneDismiss(payload);        break;
+              case "priority":            applied = ApplyOnePriority(payload);       break;
               case "edit":                applied = ApplyOneEdit(payload);           break;
             }
           }
@@ -202,10 +203,10 @@ namespace SuperMemoAssistant.Plugins.SMGo
             Serilog.Log.Warning(ex, "SMGo Supabase: failed to apply item {Id}", id);
           }
 
-          // Grade and dismiss: mark applied regardless of success — AssignGrade can
-          // silently fail outside a review session; retrying forever creates an
-          // infinite loop and duplicates all create-type items.
-          bool shouldMark = applied || type == "grade" || type == "dismiss";
+          // Grade, dismiss, priority: mark applied regardless of success — these
+          // can silently fail (grade outside review session, element not in priority queue);
+          // retrying forever creates an infinite loop and duplicates create-type items.
+          bool shouldMark = applied || type == "grade" || type == "dismiss" || type == "priority";
           if (shouldMark) await MarkSupabaseApplied(id);
           await Task.Delay(600);
         }
@@ -364,6 +365,48 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var element = Svc.SM.Registry.Element[elementId];
       if (element == null) return false;
       return element.Done();
+    }
+
+    private bool ApplyOnePriority(JObject p)
+    {
+      var elementId = p["elementId"]?.Value<int>() ?? 0;
+      var priority  = p["priority"]?.Value<double>() ?? -1;
+      if (elementId <= 0 || priority < 0 || priority > 100) return false;
+
+      // priority.sub is a flat array of 4-byte little-endian uint32 element IDs.
+      // The position (index) of an element determines its priority rank:
+      //   priority% = index / total × 100  (lower index = higher priority)
+      // We reposition the element to the slot that matches the requested percentage.
+      var subFile = Path.Combine(CollectionInfoDir, "priority.sub");
+      if (!File.Exists(subFile)) return false;
+      try
+      {
+        var bytes = File.ReadAllBytes(subFile);
+        var count = bytes.Length / 4;
+        var ids   = new List<int>(count);
+        for (int i = 0; i < bytes.Length; i += 4)
+          ids.Add((int)BitConverter.ToUInt32(bytes, i));
+
+        if (!ids.Remove(elementId)) return false; // element not tracked in priority queue
+
+        int targetIdx = (int)Math.Round(priority / 100.0 * ids.Count);
+        targetIdx = Math.Max(0, Math.Min(ids.Count, targetIdx));
+        ids.Insert(targetIdx, elementId);
+
+        var outBytes = new byte[ids.Count * 4];
+        for (int i = 0; i < ids.Count; i++)
+          Array.Copy(BitConverter.GetBytes((uint)ids[i]), 0, outBytes, i * 4, 4);
+        File.WriteAllBytes(subFile, outBytes);
+
+        Serilog.Log.Information("SMGo priority: elem {Id} → {Pct}% (slot {Idx}/{Total})",
+          elementId, priority, targetIdx, ids.Count);
+        return true;
+      }
+      catch (Exception ex)
+      {
+        Serilog.Log.Warning(ex, "SMGo ApplyOnePriority failed for elem {Id}", elementId);
+        return false;
+      }
     }
 
     private bool ApplyOneEdit(JObject p)
@@ -836,6 +879,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
     // ── PDF serving (LAN fallback) ────────────────────────────────────────
 
     private const string CollectionElemDir = @"C:\SuperMemo\systems\Facharzt\elements";
+    private const string CollectionInfoDir = @"C:\SuperMemo\systems\Facharzt\info";
 
     // Find the parent .pdf file for a pdf-extract element.
     // SM creates the parent PDF element first (ID=N), then children (N+1, N+2...) in the same dir bucket.
