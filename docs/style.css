@@ -212,15 +212,24 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
   cursor: text;
 }
 
-/* S Pen detected (class set on <html> on first pen hover, before any touch) —
-   suppress native long-press callout; pen pointerdown is always cancelable per
-   spec so touch-action is irrelevant for pen, but callout suppression matters. */
+/* S Pen detected (class set on <html> on first pen hover) — suppress native long-press callout. */
 .pen-active .selectable { -webkit-touch-callout: none; }
 .pen-active .textLayer  { -webkit-touch-callout: none; }
 .pen-active #card-area  { cursor: text; }
 
 /* Let the card scroll vertically without grabbing touch for other gestures */
 .card { touch-action: pan-y; }
+
+/* pen-hover-select: added by JS on pointerover/pointerenter when pointerType==='pen'.
+   Chromium latches touch-action from CSS at gesture-start (compositor thread), BEFORE
+   pointerdown fires — so dynamic style.touchAction in pointerdown is always too late.
+   S Pen generates hover events (buttons===0) before touching; finger touch never does.
+   Setting touch-action:none here ensures the compositor sees it before any pen pointerdown,
+   while finger scroll (no hover → class never added) is unaffected. */
+.pen-hover-select {
+  touch-action: none !important;
+  -webkit-touch-callout: none;
+}
 
 /* ── Extract flash confirmation ───────────── */
 .extract-flash {

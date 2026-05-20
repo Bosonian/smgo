@@ -1960,6 +1960,24 @@ function penSelectWordAt(x, y) {
   } catch {}
 }
 
+// Set touch-action:none on el when S Pen hovers, remove when it leaves or lifts.
+// Chromium evaluates touch-action from CSS on the compositor thread at gesture-start,
+// before JS pointerdown runs — so the only way to prevent Samsung's gesture recognizer
+// from claiming pen drags as scrolls is to have touch-action:none in place BEFORE
+// pointerdown. S Pen generates hover events (pointerover, buttons===0) before touching;
+// finger touch never generates hover → finger scroll is unaffected.
+function wirePenHoverGate(el) {
+  const add = e => { if (e.pointerType === 'pen') el.classList.add('pen-hover-select'); };
+  const rem = e => {
+    if (e.pointerType !== 'pen') return;
+    if (!el.hasPointerCapture?.(e.pointerId)) el.classList.remove('pen-hover-select');
+  };
+  el.addEventListener('pointerover',  add, { passive: true });
+  el.addEventListener('pointerenter', add, { passive: true });
+  el.addEventListener('pointerout',   rem, { passive: true });
+  el.addEventListener('pointerleave', rem, { passive: true });
+}
+
 // Shared helper: apply a caret-range drag selection from a recorded anchor.
 // Uses setBaseAndExtent (Chrome/Safari/FF53+) which handles direction automatically
 // and is more reliable on Samsung Android than the manual Range approach.
@@ -1975,6 +1993,7 @@ function penApplyDragSelection(anchor, ex, ey) {
 
 (function wirePdfTextSelection() {
   const layer = $('pdf-text-layer');
+  wirePenHoverGate(layer);  // sets touch-action:none via CSS before pointerdown fires
 
   layer.addEventListener('pointerdown', e => {
     if (_imgCropMode) return;
@@ -1990,15 +2009,11 @@ function penApplyDragSelection(anchor, ex, ey) {
     _pdfColDivX   = detectPdfColumnDivider();
     _pdfSelAnchor = { node: caret.startContainer, offset: caret.startOffset };
     if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
-      // Both mouse and S Pen capture immediately; pen never scrolls.
-      // touch-action:none during pen drag prevents Samsung from firing pointercancel
-      // when its touch-scroll heuristic triggers (which was capping selection at ~2 chars).
       e.preventDefault();
       window.getSelection()?.removeAllRanges();
-      if (e.pointerType === 'pen') layer.style.touchAction = 'none';
       layer.setPointerCapture(e.pointerId);
     }
-  });
+  }, { passive: false });
 
   layer.addEventListener('pointermove', e => {
     if (!_pdfSelAnchor || e.buttons === 0) return;
@@ -2016,8 +2031,8 @@ function penApplyDragSelection(anchor, ex, ey) {
     penApplyDragSelection(_pdfSelAnchor, tx, e.clientY);
   });
 
-  layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; layer.style.touchAction = ''; });
-  layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; layer.style.touchAction = ''; });
+  layer.addEventListener('pointerup',     () => { _pdfSelAnchor = null; layer.classList.remove('pen-hover-select'); });
+  layer.addEventListener('pointercancel', () => { _pdfSelAnchor = null; layer.classList.remove('pen-hover-select'); });
 })();
 
 // S Pen selection on the review card text area — mirrors PDF text layer behaviour.
@@ -2025,6 +2040,7 @@ function penApplyDragSelection(anchor, ex, ey) {
 (function wirePenCardSelection() {
   const area = $('card-area');
   let cardAnchor = null;
+  wirePenHoverGate(area);  // sets touch-action:none via CSS before pointerdown fires
 
   area.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'pen') return;
@@ -2041,18 +2057,22 @@ function penApplyDragSelection(anchor, ex, ey) {
     if (!caret) return;
     e.preventDefault();
     window.getSelection()?.removeAllRanges();
-    area.style.touchAction = 'none';
     area.setPointerCapture(e.pointerId);
     cardAnchor = { node: caret.startContainer, offset: caret.startOffset };
-  });
+  }, { passive: false });
 
   area.addEventListener('pointermove', e => {
     if (!cardAnchor || e.pointerType !== 'pen' || e.buttons === 0) return;
-    penApplyDragSelection(cardAnchor, e.clientX, e.clientY);
+    // Clamp coordinates to area bounds — pointer capture keeps events flowing
+    // even when pen moves outside the element
+    const r  = area.getBoundingClientRect();
+    const cx = Math.max(r.left + 1, Math.min(e.clientX, r.right  - 1));
+    const cy = Math.max(r.top  + 1, Math.min(e.clientY, r.bottom - 1));
+    penApplyDragSelection(cardAnchor, cx, cy);
   });
 
-  area.addEventListener('pointerup',     () => { area.style.touchAction = ''; if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
-  area.addEventListener('pointercancel', () => { area.style.touchAction = ''; cardAnchor = null; });
+  area.addEventListener('pointerup',     () => { area.classList.remove('pen-hover-select'); if (cardAnchor) { cardAnchor = null; scheduleSelCheck(100); } });
+  area.addEventListener('pointercancel', () => { area.classList.remove('pen-hover-select'); cardAnchor = null; });
 })();
 
 async function renderCropToDataUrl(crop) {
