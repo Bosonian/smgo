@@ -24,7 +24,6 @@
     <button id="extract-badge-btn" style="display:none" title="Pending extracts">
       ✂ <span id="extract-count">0</span>
     </button>
-    <button id="lib-btn" title="PDF Library">📚</button>
     <button id="typo-toggle" title="Reading settings">Aa</button>
     <button id="theme-toggle" title="Toggle theme">☀️</button>
     <span id="settings-icon" title="Settings">⚙</span>
@@ -91,17 +90,6 @@
     <p id="done-msg" style="color:var(--muted);font-size:.9rem"></p>
     <p id="done-sub" style="color:var(--muted);font-size:.8rem;margin-top:4px"></p>
     <button id="done-restart-btn" style="margin-top:16px;padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">Review again from start</button>
-    <button id="done-library-btn" style="padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">📚 Read PDFs</button>
-  </div>
-
-  <!-- PDF Library screen -->
-  <div id="screen-library" style="display:none">
-    <div id="library-header">
-      <button id="lib-back-btn">← Back</button>
-      <span>PDF Library</span>
-      <button id="lib-pick-btn">+ Add folder</button>
-    </div>
-    <div id="library-list"></div>
   </div>
 
   <!-- Review card area (injected by app.js) -->
@@ -120,7 +108,6 @@
     <div id="grade-row"></div>
     <div id="card-meta-row">
       <button id="skip-btn" class="secondary-btn">Skip →</button>
-      <button id="pdf-open-btn" class="secondary-btn" style="display:none">📄 PDF</button>
       <button id="edit-btn" class="secondary-btn" style="display:none">✏ Note</button>
       <button id="priority-btn" class="secondary-btn" style="display:none" title="Set priority in SM">P: –</button>
       <button id="dismiss-btn" class="secondary-btn dismiss-btn" style="display:none">Dismiss</button>
@@ -185,56 +172,6 @@
       <div class="modal-footer">
         <button id="qa-cancel-btn" class="secondary-btn">Cancel</button>
         <button id="qa-save-btn" class="primary-btn">Save Q&amp;A</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- PDF viewer modal (full-screen) -->
-  <div id="pdf-modal" class="modal pdf-modal">
-    <div class="pdf-modal-inner">
-      <div id="pdf-modal-header">
-        <button id="pdf-close-btn" class="pdf-hdr-close" title="Close">✕</button>
-        <span id="pdf-title-label"></span>
-      </div>
-      <div id="pdf-viewport">
-        <div id="pdf-loading-msg">Loading PDF…</div>
-        <div id="pdf-error-msg" style="display:none"></div>
-        <div id="pdf-no-folder-msg" style="display:none">
-          <p>No PDF folder set.</p>
-          <button id="pdf-set-folder-btn" class="primary-btn">Add PDF folder</button>
-        </div>
-        <div id="pdf-canvas-wrap">
-          <canvas id="pdf-canvas"></canvas>
-          <div id="pdf-highlight-layer"></div>
-          <div id="pdf-text-layer" class="textLayer"></div>
-          <div id="pdf-img-crop-overlay"></div>
-        </div>
-      </div>
-      <!-- Toolbar toggle — always visible at right edge, collapses action bar for reading -->
-      <button id="pdf-toolbar-toggle" title="Toggle toolbar">▾</button>
-      <!-- Crop choice bar — appears after drawing a crop, only when staging buffer is empty -->
-      <div id="pdf-crop-choice-bar" style="display:none">
-        <span>Image region:</span>
-        <button id="pdf-crop-extract-now-btn">✂ Extract now</button>
-        <button id="pdf-crop-stage-btn">+ Stage</button>
-      </div>
-      <!-- Staged segments bar — shown when buffer has content -->
-      <div id="pdf-staged-bar" style="display:none">
-        <span id="pdf-staged-count">0 staged</span>
-        <button id="pdf-stage-extract-btn">✂ Extract All</button>
-        <button id="pdf-stage-clear-btn">✕</button>
-      </div>
-      <div id="pdf-action-bar">
-        <button id="pdf-prev-btn" class="pdf-nav-btn" title="Previous page">←</button>
-        <input id="pdf-page-info" type="text" value="–" readonly inputmode="numeric" title="Tap to jump to page">
-        <button id="pdf-next-btn" class="pdf-nav-btn" title="Next page">→</button>
-        <div class="pdf-bar-sep"></div>
-        <button id="pdf-stage-btn"   class="pdf-act-btn" title="Stage selection for multi-extract" disabled>+</button>
-        <button id="pdf-extract-btn" class="pdf-act-btn" title="Extract selection to SM" disabled>✂</button>
-        <button id="pdf-cloze-btn"   class="pdf-act-btn" title="Create cloze"            disabled>[ ]</button>
-        <button id="pdf-qa-btn"      class="pdf-act-btn" title="Generate Q&amp;A"        disabled>🤖</button>
-        <button id="pdf-img-btn"     class="pdf-act-btn" title="Extract image region">🖼</button>
-        <button id="pdf-mark-btn"    class="pdf-act-btn" title="Mark page as read">◉</button>
       </div>
     </div>
   </div>
