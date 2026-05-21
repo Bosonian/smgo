@@ -199,11 +199,13 @@ function getPriorityMap() {
   return map;
 }
 
-// Return all outstanding cards for today — renderable types only
+// Return all outstanding cards for today — renderable types only.
+// Q&A pairs (question ends with "?", answer at id+1) are merged: answer is
+// embedded into the question card and the answer card is removed from the list.
 function getTodayCards() {
   const ids         = getOutstandingIds();
   const priorityMap = getPriorityMap();
-  return ids.map(id => {
+  const cards = ids.map(id => {
     const card = buildCard(id);
     const p = priorityMap.get(id);
     if (p !== undefined) card.priority = p;
@@ -211,6 +213,21 @@ function getTodayCards() {
   }).filter(c =>
     c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'cloze' || c.type === 'image'
   );
+
+  // Detect and merge Q→A pairs
+  const answerIds = new Set();
+  const idMap = new Map(cards.map(c => [c.id, c]));
+  for (const card of cards) {
+    if (card.type !== 'topic') continue;
+    if (!card.body?.trimEnd().endsWith('?')) continue;
+    const answer = idMap.get(card.id + 1);
+    if (!answer || answer.type !== 'topic') continue;
+    if (answer.body?.trimEnd().endsWith('?')) continue; // answer is itself a question
+    card.answer = answer.body;
+    card.answerPairId = answer.id;
+    answerIds.add(answer.id);
+  }
+  return cards.filter(c => !answerIds.has(c.id));
 }
 
 module.exports = { getTodayCards, getOutstandingIds, findElementFile, findParentPdfFile, COLLECTION };

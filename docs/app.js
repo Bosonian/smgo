@@ -299,6 +299,10 @@ function renderCard() {
     } else {
       bodyHtml = `<div class="card-body" style="color:var(--muted)">Image – only available on home network.</div>`;
     }
+  } else if (c.answer) {
+    // Q&A pair: show question now, answer hidden until revealed
+    bodyHtml = `<div class="card-body selectable">${formatBody(c.body)}</div>
+      <div class="card-answer" id="card-answer" style="display:none">${formatBody(c.answer)}</div>`;
   } else if (c.body) {
     bodyHtml = `<div class="card-body selectable">${formatBody(c.body)}</div>`;
   } else {
@@ -334,8 +338,8 @@ function renderCard() {
   prioBtn.style.display = showPrio ? 'inline-flex' : 'none';
   if (showPrio) prioBtn.textContent = `P: ${c.priority}%`;
 
-  if (c.type === 'cloze') {
-    revealBtn.textContent = 'Reveal Answer';
+  if (c.type === 'cloze' || c.answer) {
+    revealBtn.textContent = 'Show Answer';
     revealBtn.onclick = doReveal;
   } else {
     revealBtn.textContent = 'Done (read)';
@@ -346,6 +350,8 @@ function renderCard() {
 function doReveal() {
   revealed = true;
   document.querySelectorAll('.cloze-blank').forEach(el => el.classList.add('revealed'));
+  const answerEl = document.getElementById('card-answer');
+  if (answerEl) answerEl.style.display = '';
   showGrades();
 }
 
@@ -496,7 +502,12 @@ const GRADE_LABELS = [['0','Null'],['1','Bad'],['2','Fail'],['3','Pass'],['4','G
 })();
 
 function applyGrade(grade) {
-  grades.push({ elementId: cards[idx].id, grade, timestamp: new Date().toISOString() });
+  const c = cards[idx];
+  grades.push({ elementId: c.id, grade, timestamp: new Date().toISOString() });
+  // Grade the answer element with the same grade when it's a Q&A pair
+  if (c.answerPairId) {
+    grades.push({ elementId: c.answerPairId, grade, timestamp: new Date().toISOString() });
+  }
   saveProgress();
   idx++;
   renderCard();
