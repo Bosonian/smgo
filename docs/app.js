@@ -309,13 +309,17 @@ function renderCard() {
   const prioBadge = c.priority !== undefined
     ? `<span class="priority-badge ${prioClass}">${c.priority}%</span>` : '';
 
+  const cardHeading = c.type === 'pdf-extract' && c.pdfFilename
+    ? esc(c.pdfFilename.replace(/\.[^.]+$/, '').replace(/_/g, ' '))
+    : '';
+
   cardArea.innerHTML = `
     <div class="card">
       <div class="card-top-row">
         <span class="card-type-badge ${badgeClass}">${typeLabel[c.type] || c.type}</span>
         ${prioBadge}
       </div>
-      <div class="card-title">${esc(c.title)}</div>
+      ${cardHeading ? `<div class="card-title">${cardHeading}</div>` : ''}
       ${bodyHtml}
     </div>`;
 
