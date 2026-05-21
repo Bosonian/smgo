@@ -1,6 +1,6 @@
-const CACHE = 'smgo-v42';
+const CACHE = 'smgo-v43';
 const SHELL = ['./', './index.html', './app.js', './style.css', './manifest.json',
-               './icons/icon-192.png', './icons/icon-512.png'];
+               './favicon.ico', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
