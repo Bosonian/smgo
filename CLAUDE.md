@@ -14,18 +14,25 @@ Live PWA: https://bosonian.github.io/smgo/
 ## Architecture
 
 ```
-Phone (PWA — GitHub Pages)
-        │  reads cards from         │  pushes extracts/grades/items via
-        ▼                           ▼
-  Supabase (cloud)  ◄──────────────────────────────────
-        │                           │
-        │  plugin polls every 30s   │  plugin runs export-cloud.js on SM open
-        ▼                           │
-  Desktop (SuperMemo + SMA plugin) ─┘
+Android devices (S7 Tab, S25 Ultra)
+        │  Xodo annotates PDFs in-place
+        │  Syncthing syncs modified PDFs back to Windows
+        ▼
+Windows (highlight-extract.js — runs every 5 min via Task Scheduler)
+        │  extracts annotation text from PDFs → pushes to Supabase
+        ▼
+  Supabase (cloud)  ◄──── PWA pushes grades/extracts/items/priority/dismiss
+        │
+        │  plugin polls every 30s
+        ▼
+  Desktop (SuperMemo + SMA plugin)
+        │  on SM open: export-cloud.js pushes today's cards + RunHighlightExtract()
+        └─ reads/writes priority.sub, Outstanding.sub, element HTML files
 ```
 
-Two sync paths:
+Three sync paths:
 - **Cloud (Supabase)** — works from anywhere, primary path
+- **PDF highlights (Syncthing + highlight-extract.js)** — annotation pipeline
 - **Local server (port 3001)** — LAN only, fallback if no Supabase
 
 ---
@@ -39,16 +46,21 @@ C:\SuperMemo\SMGo\
 │   ├── index.html
 │   ├── style.css
 │   ├── sw.js                ← service worker (bump CACHE version on every deploy)
-│   ├── manifest.json
-│   ├── icons/
+│   ├── manifest.json        ← orientation: portrait (locks PWA to portrait)
+│   ├── favicon.ico
+│   ├── icons/               ← icon-192.png, icon-512.png, icon-180.png
 │   └── data/today.json      ← exported cards for static/offline mode
 ├── SMAPlugin/
 │   ├── SMGoPlugin.cs        ← C# SMA plugin (HTTP server + file watchers + Supabase poller)
 │   └── SuperMemoAssistant.Plugins.SMGo.csproj
 ├── sm-parser.js             ← reads SM Outstanding.sub + element HTML → card objects
+│                               also: getPriorityMap(), Q&A pair detection/merging
 ├── server.js                ← optional Node.js server (same API as SMA plugin, port 3001)
 ├── export.js                ← manual: generates today.json + git push
 ├── export-cloud.js          ← auto: pushes today's cards to Supabase (run by plugin on startup)
+├── highlight-extract.js     ← scans SM element PDFs for annotations → pushes to Supabase
+│                               run automatically every 5 min by Task Scheduler
+├── highlight-extract-state.json  ← mtime cache per PDF — GITIGNORED
 ├── config.json              ← Supabase credentials — GITIGNORED, never commit
 └── .gitignore
 ```
@@ -81,10 +93,11 @@ C:\SuperMemo\SMGo\
 
 - **Port:** 3001 (HttpListener on `http://+:3001/`)
 - **DataDir:** `C:\SuperMemo\SMGo`
+- **CollectionInfoDir:** `C:\SuperMemo\systems\Facharzt\info`
 - **DLL install path:** `C:\Users\deepak\SuperMemoAssistant\Plugins\Packages\SuperMemoAssistant.Plugins.SMGo.1.0.0\lib\net472\`
 - **Build:** `"C:\Program Files\dotnet\dotnet.exe" build -c Release` (MSBuild v4 won't work — SDK-style project requires dotnet CLI)
 - **Config file:** reads `config.json` at startup for Supabase credentials
-- **On SM open:** waits 5s → runs `cmd.exe /c node export-cloud.js` → pushes today's cards to Supabase
+- **On SM open:** waits 5s → runs `export-cloud.js` then `highlight-extract.js` via `cmd.exe /c node`
 - **Supabase poller:** starts 15s after SM open, then every 30s — fetches `applied=false` rows, applies, PATCHes `applied=true`
 - **File watchers:** `grades/`, `extracts/`, `items/`, `dismisses/` — local fallback for LAN-only sync
 - **Routes:** GET `/api/today`, POST `/api/grades`, POST `/api/extracts`, GET `/api/extracts`, POST `/api/items`, POST `/api/dismiss`, POST `/api/apply`, GET `/api/images/:id`
@@ -94,12 +107,83 @@ C:\SuperMemo\SMGo\
 - Q&A → `ElementType.Item` with two `TextContent` args (question, answer)
 - Cloze → `ElementType.Item`, regex `[word]` → `<span style="color:blue">[...]</span>`
 - Grade → `GoToElement(id)` + sleep 400ms + `AssignGrade(grade)` + sleep 200ms
-- Dismiss → `GoToElement(id)` + sleep 400ms + `Done()`
+- Dismiss → `Svc.SM.Registry.Element[id].Done()` — calls SM engine directly (no UI dialog), marks as Dismissed permanently
+- Priority → reads/writes `info/priority.sub` directly (flat uint32 array, position = rank)
 - `ElementBuilder(ElementType, params ContentBase[])` — no `.WithContent()` method, pass contents in constructor
+- **pdf-extract-create** → creates SM element with multiple `<p>` segments from `payload.segments[]`
+
+### Supabase queue types handled by plugin
+| type | payload fields | effect |
+|------|---------------|--------|
+| `grade` | `elementId`, `grade` | GoToElement + AssignGrade |
+| `extract` | `parentId`, `text` | create child Topic element |
+| `pdf-extract-create` | `parentId`, `segments[]` | create child Topic with multiple paragraphs |
+| `cloze` | `parentId`, `sentence`, `answer` | create Item with cloze blank |
+| `qa` | `parentId`, `question`, `answer` | create Item |
+| `dismiss` | `elementId` | element.Done() — permanent removal from Outstanding |
+| `priority` | `elementId`, `priority` (0–100%) | reposition in priority.sub |
+
+---
+
+## PDF Highlight Extraction Pipeline
+
+### Overview
+Xodo (Android) annotates PDFs in-place → Syncthing syncs to Windows → `highlight-extract.js` extracts text → pushes to Supabase → SM plugin creates child elements.
+
+### Color scheme
+| Color | Action |
+|-------|--------|
+| 🟠 Orange | Stage: accumulate in buffer, waiting for green |
+| 🟢 Green | Commit: add green text as final segment, flush buffer as one `pdf-extract-create` |
+| 🟡 Yellow | Extract immediately as individual SM element |
+| 🔵 Blue / pink | Skip entirely |
+
+- Staging buffer is per-PDF, persists across pages
+- Green with no staged oranges → treated as immediate yellow
+- Uncommitted oranges logged as warning at end of PDF
+
+### highlight-extract.js internals
+- `highlightId()` — SHA1 of `{relPath, pageIndex, roundedQuadPoints, text}` → `hl-{hex16}`
+- `groupId()` — SHA1 of ordered member IDs → `grp-{hex16}` (stable across re-runs)
+- `mtime` cache in `highlight-extract-state.json` — skip unmodified PDFs; **not updated in `--dry-run` mode**
+- Sync-conflict files (`.sync-conflict-*`) filtered out before processing
+- Supabase push uses `Prefer: resolution=ignore-duplicates` — fully idempotent
+
+### Xodo annotation format quirks
+- **quadPoints** returned as `[[{x,y},{x,y},{x,y},{x,y}], ...]` (array of quads, each quad = 4 `{x,y}` objects) — NOT the standard flat number array. `quadPointsToRects()` handles both formats.
+- **color values** are 0–255 integers (TypedArray), not 0–1 floats. `classifyColor()` normalizes: `if (r > 1 || g > 1 || b > 1) { r/=255; g/=255; b/=255 }`.
+
+### Automation
+- **Task Scheduler** job `SMGo-HighlightScan`: runs `C:\Program Files\nodejs\node.exe highlight-extract.js` every 5 minutes, `MultipleInstances=IgnoreNew`
+- Also triggered at SM startup by plugin (`RunHighlightExtract()`)
+
+---
+
+## Syncthing Setup
+
+- **Windows executable:** `C:\Users\deepak\AppData\Local\Microsoft\WinGet\Packages\Syncthing.Syncthing_...\syncthing.exe`
+- **Web UI:** `http://127.0.0.1:8384` (API key in config)
+- **Auto-start:** Task Scheduler job `Syncthing` at logon, `--no-browser` flag
+- **Folder ID:** `sm-elements` → `C:\SuperMemo\systems\Facharzt\elements` (Send & Receive)
+- **Devices:** Windows (DEEPAKBOSA055), S7 Tab (`L7IMDJC-…`), S25 Ultra (`5LYUWTW-…`)
+- **Topology:** full mesh (Windows↔Tab, Windows↔S25, Tab↔S25 direct)
+- Android: use **Syncthing-Fork** (Play Store), set battery to **Unrestricted** or it stops in background
 
 ---
 
 ## PWA Key Details
+
+### Card rendering
+- **pdf-extract**: heading shows `pdfFilename` without extension (e.g. `030-071 Neuroborreliose 2024-05`)
+- **topic / cloze**: no heading — body content displayed directly
+- **Q&A pairs**: topic cards ending with `?` whose `id+1` is a non-question topic are merged; question shown first, "Show Answer" button reveals answer. Both Q and A element IDs graded together.
+- **Priority badge**: shown when Supabase is configured; color-coded `prio-high` (≤20%), `prio-mid` (≤50%), `prio-low` (>50%)
+
+### Q&A pair detection (sm-parser.js)
+Cards are merged in `getTodayCards()` post-processing:
+1. Topic card body ends with `?`
+2. Card at `id+1` exists, is type `topic`, and does NOT end with `?`
+→ `card.answer = answer.body`, `card.answerPairId = answer.id`, answer card removed from list
 
 ### localStorage keys
 | Key | Purpose |
@@ -128,8 +212,11 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v21` — **must bump on every meaningful deploy** or phone will serve stale JS.
-Shell: `['./','./index.html','./app.js','./style.css','./manifest.json','./icons/icon-192.png','./icons/icon-512.png']`
+Cache name: `smgo-v45` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Shell: `['./', './index.html', './app.js', './style.css', './manifest.json', './favicon.ico', './icons/icon-192.png', './icons/icon-512.png']`
+
+### Manifest
+`orientation: "portrait"` — locks PWA to portrait, overrides system rotation setting.
 
 ### Gemini Q&A
 Probes 8 model variants in order, caches the first that works in `smgo_gemini_model`.
@@ -191,3 +278,19 @@ git push
 15. **Duplicate `OnSMStopped()` causes silent compile failure** — Added the method twice during iterative edits. C# gives a clear error but it's easy to miss if not checking build output carefully.
 
 16. **`config.json` must be gitignored** — Contains Supabase credentials. Add to `.gitignore` before first commit or credentials end up in public repo history.
+
+17. **`IElementWdw.Done()` shows a confirmation dialog** — `Svc.SM.UI.ElementWdw.Done()` triggers SM's UI dismiss dialog. Use `Svc.SM.Registry.Element[id].Done()` instead — calls the engine directly, no dialog, marks element as Dismissed immediately.
+
+18. **`SetElementState` is not for learning state** — Despite the name, `IElementWdw.SetElementState` controls the *display* mode of the element window (e.g. question/answer view), not the learning state (Memorized/Dismissed). Cannot be used to dismiss elements.
+
+19. **priority.sub format** — Flat array of 4-byte little-endian uint32 element IDs. Position in array = priority rank. `priority% = index / total × 100` (lower % = higher priority = earlier in array). Read/write directly with `BitConverter`; changes take effect on next SM startup.
+
+20. **Xodo quadPoints format differs from PDF spec** — Standard PDF highlight annotations store quadPoints as a flat array of numbers (8 per quad). Xodo stores them as an array of arrays of `{x, y}` objects: `[[{x,y}×4], ...]`. Always handle both formats. Also: Xodo colors are 0–255 integer TypedArrays, not 0–1 floats — normalize before classifying.
+
+21. **dry-run must not update mtime state** — If `highlight-extract.js --dry-run` writes to `highlight-extract-state.json`, subsequent real runs will skip those PDFs. Always guard state writes with `if (!DRY_RUN)`.
+
+22. **Task Scheduler needs full path to node** — Scheduled tasks run in a stripped environment that may not have user PATH. Use `C:\Program Files\nodejs\node.exe` as the executable, not just `node`.
+
+23. **Syncthing-Fork stops on Android with battery optimization** — Samsung's aggressive power management kills Syncthing-Fork when the screen is off unless battery is set to **Unrestricted** in App settings. Symptoms: device shows "Disconnected" in Syncthing UI after screen timeout.
+
+24. **Syncthing folder share popup appears in web UI, not system notifications** — On Android, the "remote device wants to share folder X" notification does not appear as a system notification. Must open Syncthing-Fork → web UI (globe icon) to see and accept it.
