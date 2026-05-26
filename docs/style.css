@@ -122,13 +122,16 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 
 .card-answer {
   margin-top: .75rem;
-  padding-top: .75rem;
-  border-top: 1px solid var(--border);
-  font-size: .88rem; color: var(--text); line-height: 1.7;
-  word-break: break-word;
 }
-.card-answer p { margin: 0 0 .55em; }
-.card-answer p:last-child { margin-bottom: 0; }
+.answer-divider {
+  display: flex; align-items: center; gap: .6rem;
+  font-size: .7rem; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+  margin-bottom: .5rem;
+}
+.answer-divider::before, .answer-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
 
 .cloze-sentence {
   background: var(--surface2);

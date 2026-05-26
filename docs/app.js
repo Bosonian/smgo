@@ -302,7 +302,10 @@ function renderCard() {
   } else if (c.answer) {
     // Q&A pair: show question now, answer hidden until revealed
     bodyHtml = `<div class="card-body selectable">${formatBody(c.body)}</div>
-      <div class="card-answer" id="card-answer" style="display:none">${formatBody(c.answer)}</div>`;
+      <div class="card-answer" id="card-answer" style="display:none">
+        <div class="answer-divider">Answer</div>
+        <div class="card-body">${formatBody(c.answer)}</div>
+      </div>`;
   } else if (c.body) {
     bodyHtml = `<div class="card-body selectable">${formatBody(c.body)}</div>`;
   } else {
@@ -351,7 +354,10 @@ function doReveal() {
   revealed = true;
   document.querySelectorAll('.cloze-blank').forEach(el => el.classList.add('revealed'));
   const answerEl = document.getElementById('card-answer');
-  if (answerEl) answerEl.style.display = '';
+  if (answerEl) {
+    answerEl.style.display = '';
+    setTimeout(() => answerEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+  }
   showGrades();
 }
 
@@ -363,12 +369,15 @@ function skipCard() {
 function dismissCard() {
   const card = cards[idx];
   if (!card) return;
-  const rec = { elementId: card.id, timestamp: new Date().toISOString() };
-  dismisses.push(rec);
-  saveProgress();
-  // Persist cross-day — use raw store so we never drop old-but-unsynced entries
+  const now = new Date().toISOString();
+  const ids = [card.id];
+  if (card.answerPairId) ids.push(card.answerPairId);
   const dList = loadDismissedRaw();
-  dList.push({ elementId: card.id, timestamp: rec.timestamp, synced: false });
+  for (const eid of ids) {
+    dismisses.push({ elementId: eid, timestamp: now });
+    dList.push({ elementId: eid, timestamp: now, synced: false });
+  }
+  saveProgress();
   saveDismissed(dList);
   showFlash('Dismissed');
   // Attempt upload now; syncAllDismissed handles retry if offline

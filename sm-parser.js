@@ -223,6 +223,7 @@ function getTodayCards() {
     const answer = idMap.get(card.id + 1);
     if (!answer || answer.type !== 'topic') continue;
     if (answer.body?.trimEnd().endsWith('?')) continue; // answer is itself a question
+    if (!answer.body) continue; // empty answer — not a real pair
     card.answer = answer.body;
     card.answerPairId = answer.id;
     answerIds.add(answer.id);
