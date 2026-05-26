@@ -110,7 +110,8 @@ C:\SuperMemo\SMGo\
 - Dismiss → `Svc.SM.Registry.Element[id].Done()` — calls SM engine directly (no UI dialog), marks as Dismissed permanently
 - Priority → reads/writes `info/priority.sub` directly (flat uint32 array, position = rank)
 - `ElementBuilder(ElementType, params ContentBase[])` — no `.WithContent()` method, pass contents in constructor
-- **pdf-extract-create** → creates SM element with multiple `<p>` segments from `payload.segments[]`
+- **pdf-extract-create** → creates SM element from `payload.segments[]`; each segment is `{kind:'text', text}` or `{kind:'image', dataUrl?}` or `{kind:'image', imgPath?}`; `imgPath` is rendered as `<img src="file:///...">` with backslashes converted to forward slashes
+- **ElemCreationFlags.None** — used for all `Element.Add()` calls; `CreateSubfolders` was causing new elements to land in an auto-created concept subfolder instead of directly under the specified parent
 
 ### Supabase queue types handled by plugin
 | type | payload fields | effect |
@@ -130,20 +131,46 @@ C:\SuperMemo\SMGo\
 ### Overview
 Xodo (Android) annotates PDFs in-place → Syncthing syncs to Windows → `highlight-extract.js` extracts text → pushes to Supabase → SM plugin creates child elements.
 
-### Color scheme
+### Color scheme — text highlights
 | Color | Action |
 |-------|--------|
 | 🟠 Orange | Stage: accumulate in buffer, waiting for green |
-| 🟢 Green | Commit: add green text as final segment, flush buffer as one `pdf-extract-create` |
+| 🟢 Green | Commit: add green as final segment, flush buffer as one `pdf-extract-create` |
 | 🟡 Yellow | Extract immediately as individual SM element |
 | 🔵 Blue / pink | Skip entirely |
 
-- Staging buffer is per-PDF, persists across pages
-- Green with no staged oranges → treated as immediate yellow
+### Color scheme — rectangle annotations (Square subtype)
+| Color | Action |
+|-------|--------|
+| 🟠 Orange / red / yellow / pink / other | Stage |
+| 🟢 Green | Commit (lone green rect → immediate extract) |
+| 🔵 Blue | Skip |
+
+Rectangle color logic is intentionally permissive: Xodo's default rect color is red `{219,52,37}` which classifies as `pink` → stage.
+
+- Staging buffer is per-PDF, persists across pages; text and rect members mix freely
+- Green with no staged items → treated as immediate individual extract
 - Uncommitted oranges logged as warning at end of PDF
+
+### Rectangle annotation pipeline
+1. Xodo draws a rectangle (Square PDF subtype) over a figure/flowchart
+2. `highlight-extract.js` detects `annotation.subtype === 'Square'`
+3. `renderRectToPng()` renders the full page via `@napi-rs/canvas` + pdfjs at 2× scale, then crops to the annotation rect
+4. PNG saved as side-car file: `elements/{pdfBase}-rect-{annotId}.png`
+5. Pushed to Supabase as `pdf-extract-create` with `segments: [{kind:'image', imgPath: '/absolute/path.png'}]`
+6. Plugin creates SM element: `<img src="file:///C:/path/to.png" style="max-width:100%;height:auto">`
+
+**Coordinate transform** (PDF → canvas): PDF origin is bottom-left; canvas origin is top-left.
+`cx = (rx0 - view[0]) * scale`, `cy = (view[3] - ry1) * scale`
+
+**`@napi-rs/canvas` + pdfjs shim**: pdfjs requires a module named exactly `canvas`. On ARM64 Windows there are no PyMuPDF wheels and the standard `canvas` npm package also lacks ARM64 binaries. Fix:
+- `npm install @napi-rs/canvas`
+- Create `node_modules/canvas/index.js` → `module.exports = require("@napi-rs/canvas");`
+- Create `node_modules/canvas/package.json` → `{"name":"canvas","version":"2.11.2","main":"index.js"}`
 
 ### highlight-extract.js internals
 - `highlightId()` — SHA1 of `{relPath, pageIndex, roundedQuadPoints, text}` → `hl-{hex16}`
+- `rectId()` — SHA1 of `{relPath, pageIndex, roundedRect}` → `rect-{hex16}`
 - `groupId()` — SHA1 of ordered member IDs → `grp-{hex16}` (stable across re-runs)
 - `mtime` cache in `highlight-extract-state.json` — skip unmodified PDFs; **not updated in `--dry-run` mode**
 - Sync-conflict files (`.sync-conflict-*`) filtered out before processing
@@ -152,6 +179,7 @@ Xodo (Android) annotates PDFs in-place → Syncthing syncs to Windows → `highl
 ### Xodo annotation format quirks
 - **quadPoints** returned as `[[{x,y},{x,y},{x,y},{x,y}], ...]` (array of quads, each quad = 4 `{x,y}` objects) — NOT the standard flat number array. `quadPointsToRects()` handles both formats.
 - **color values** are 0–255 integers (TypedArray), not 0–1 floats. `classifyColor()` normalizes: `if (r > 1 || g > 1 || b > 1) { r/=255; g/=255; b/=255 }`.
+- **Rectangle annotations** use `subtype === 'Square'` (standard PDF name for fixed-ratio rect tool). `annotation.rect` is `[x0, y0, x1, y1]` in PDF user units. No `quadPoints` field.
 
 ### Automation
 - **Task Scheduler** job `SMGo-HighlightScan`: runs `C:\Program Files\nodejs\node.exe highlight-extract.js` every 5 minutes, `MultipleInstances=IgnoreNew`
@@ -294,3 +322,13 @@ git push
 23. **Syncthing-Fork stops on Android with battery optimization** — Samsung's aggressive power management kills Syncthing-Fork when the screen is off unless battery is set to **Unrestricted** in App settings. Symptoms: device shows "Disconnected" in Syncthing UI after screen timeout.
 
 24. **Syncthing folder share popup appears in web UI, not system notifications** — On Android, the "remote device wants to share folder X" notification does not appear as a system notification. Must open Syncthing-Fork → web UI (globe icon) to see and accept it.
+
+25. **`ElemCreationFlags.CreateSubfolders` redirects to a concept subfolder** — Using this flag when adding a child element to a Topic (e.g. a PDF element) causes SM to auto-create a concept subfolder and place the new element there, not directly under the specified parent. Use `ElemCreationFlags.None` to place extracts exactly under `parentId`.
+
+26. **Universal PDF DRM breaks Acrobat saves (error 110)** — Some PDFs contain a "Universal PDF" trade-secret marker in their internal structure. Acrobat errors with code 110 when trying to save over such files. Fix: rewrite with pypdf — `r=pypdf.PdfReader('file.pdf', strict=False); w=pypdf.PdfWriter(); w.append(r); w.write('file_repaired.pdf')`. After repair Acrobat may still show error 110 but saves successfully.
+
+27. **Mac annotation via Parallels** — Windows running in Parallels is accessible from macOS via SMB at `\\Mac\AllFiles\Windows\...` (Z: drive from Windows, or via Finder → Network → WINDOWS-MACHINE). Mac apps can read files but cannot save back to Windows paths reliably (SMB write fails for some apps). Workaround: annotate PDFs on Windows inside Parallels (Acrobat Reader, Xodo Windows) or on Android (Xodo). PDF Expert on Mac has this limitation and also doesn't snap text highlights on network-share PDFs.
+
+28. **`@napi-rs/canvas` + pdfjs ARM64 shim** — pdfjs-dist requires a module named exactly `canvas` for server-side rendering. The standard `canvas` npm package has no ARM64 Windows prebuilts. Solution: install `@napi-rs/canvas` and create a shim at `node_modules/canvas/index.js` containing `module.exports = require("@napi-rs/canvas");` with matching `package.json`. This must be recreated after `npm ci` clears node_modules.
+
+29. **SM element ID ≠ PDF filename number (usually)** — In SM's Incremental PDF Reader, PDF files are stored in the elements folder as `{elementId}.pdf`. So `7.pdf` corresponds to SM element ID 7. The `getElementId()` function parses the filename integer and uses it as `parentId` for new child extracts — this is correct.
