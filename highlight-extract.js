@@ -28,6 +28,9 @@ try {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 } catch { console.error('SMGo highlight-extract: pdfjs-dist not found'); process.exit(0); }
 
+let createCanvas;
+try { createCanvas = require('@napi-rs/canvas').createCanvas; } catch { /* rect rendering disabled */ }
+
 // ── Config ─────────────────────────────────────────────────────────────────
 
 let config;
@@ -120,6 +123,17 @@ const COLOR_ACTION = {
   other:  'skip',
 };
 
+// For Square (rect) annotations: any non-blue/non-green color stages.
+// Red/pink are natural choices in Xodo's rect tool default palette.
+const SQUARE_COLOR_ACTION = {
+  orange: 'stage',
+  green:  'commit',
+  yellow: 'stage',
+  blue:   'skip',
+  pink:   'stage',
+  other:  'stage',
+};
+
 // ── PDF helpers ────────────────────────────────────────────────────────────
 
 function isSyncConflict(filename) {
@@ -186,6 +200,46 @@ function cleanText(raw) {
     .trim();
 }
 
+// Render a PDF rect region to a PNG side-car file. Returns absolute path or null.
+async function renderRectToPng(doc, pdfPath, pageIndex, pdfRect, annotId) {
+  if (!createCanvas) return null;
+  try {
+    const page  = await doc.getPage(pageIndex + 1);
+    const view  = page.view; // [left, bottom, right, top] in PDF user units
+    const scale = 2;
+    const vp    = page.getViewport({ scale });
+    const canvas = createCanvas(Math.round(vp.width), Math.round(vp.height));
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+
+    // Convert PDF rect (bottom-left origin) → canvas coords (top-left origin)
+    const [rx0, ry0, rx1, ry1] = pdfRect;
+    const cx = Math.max(0, Math.round((rx0 - view[0]) * scale));
+    const cy = Math.max(0, Math.round((view[3] - ry1) * scale));
+    const cw = Math.max(1, Math.round((rx1 - rx0) * scale));
+    const ch = Math.max(1, Math.round((ry1 - ry0) * scale));
+
+    const cropped = createCanvas(cw, ch);
+    cropped.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+
+    const outPath = path.join(
+      path.dirname(pdfPath),
+      `${path.basename(pdfPath, path.extname(pdfPath))}-rect-${annotId}.png`
+    );
+    fs.writeFileSync(outPath, cropped.toBuffer('image/png'));
+    return outPath;
+  } catch (err) {
+    console.log(`  rect render error: ${err.message}`);
+    return null;
+  }
+}
+
+// Stable ID for a Square annotation
+function rectId(relPath, pageIndex, rect) {
+  return 'rect-' + crypto.createHash('sha1')
+    .update(JSON.stringify({ p: relPath, pg: pageIndex, r: rect.map(v => Math.round(v)) }))
+    .digest('hex').slice(0, 16);
+}
+
 // Stable ID for a single highlight
 function highlightId(relPath, pageIndex, quadPoints, text) {
   // Normalize both quadPoints formats to a flat number array for stable hashing
@@ -240,9 +294,19 @@ async function pushImmediate(elementId, highlight) {
   return ok;
 }
 
-// Push a committed group of staged highlights as one combined SM element.
-// Each member becomes a separate <p> segment via pdf-extract-create.
-async function pushGroup(elementId, members) {
+// Push a committed group of staged highlights/rects as one combined SM element.
+async function pushGroup(elementId, members, doc) {
+  const segments = [];
+  for (const m of members) {
+    if (m.kind === 'rect') {
+      const imgPath = await renderRectToPng(doc, m.pdfPath, m.pageIndex, m.rect, m.annotId);
+      if (imgPath) segments.push({ kind: 'image', imgPath });
+    } else {
+      segments.push({ kind: 'text', text: m.text });
+    }
+  }
+  if (!segments.length) return false;
+
   const id  = groupId(members);
   const row = {
     id,
@@ -250,16 +314,34 @@ async function pushGroup(elementId, members) {
     applied: false,
     payload: {
       parentId: elementId,
-      segments: members.map(m => ({ kind: 'text', text: m.text })),
+      segments,
       source:   'pdf-highlight-staged',
       pages:    [...new Set(members.map(m => m.page))],
     },
   };
   const ok = await pushRow(row);
   if (ok) {
-    const preview = members.map(m => m.text.slice(0, 40)).join(' / ');
+    const preview = members.map(m => m.kind === 'rect' ? '[rect]' : m.text.slice(0, 40)).join(' / ');
     console.log(`  [p.${members[0].page}–${members[members.length-1].page}] 🟢 committed ${members.length} segments: ${preview.slice(0, 80)}…`);
   }
+  return ok;
+}
+
+// Push a single rect as an immediate individual SM element (yellow or lone-green rect)
+async function pushImmediateRect(elementId, h, imgPath) {
+  const row = {
+    id:      h.id,
+    type:    'pdf-extract-create',
+    applied: false,
+    payload: {
+      parentId: elementId,
+      segments: [{ kind: 'image', imgPath }],
+      source:   'pdf-highlight-rect',
+      pages:    [h.page],
+    },
+  };
+  const ok = await pushRow(row);
+  if (ok) console.log(`  [p.${h.page}] 🟡 rect extracted → ${path.basename(imgPath)}`);
   return ok;
 }
 
@@ -313,69 +395,89 @@ async function run() {
     let pageError = false;
 
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-      let page, annotations, textContent;
+      let page, annotations;
       try { page = await doc.getPage(pageNum); }           catch { continue; }
       try { annotations = await page.getAnnotations(); }   catch { continue; }
 
       const highlights = annotations.filter(a => a.subtype === 'Highlight' && a.quadPoints?.length);
-      if (!highlights.length) continue;
+      const squares    = annotations.filter(a => a.subtype === 'Square' && a.rect?.length === 4);
+      if (!highlights.length && !squares.length) continue;
 
-      try { textContent = await page.getTextContent(); }   catch { continue; }
-      const textItems = textContent.items || [];
+      let textItems = [];
+      if (highlights.length) {
+        try { const tc = await page.getTextContent(); textItems = tc.items || []; } catch { /* ok */ }
+      }
 
-      // Sort highlights in reading order (top→bottom, left→right) before processing
-      highlights.sort((a, b) => {
-        const topY = qp => Array.isArray(qp[0])
-          ? Math.max(...qp.flatMap(q => q.map(p => p.y)))
-          : Math.max(...Array.from(qp).filter((_, i) => i % 2 === 1));
-        return topY(b.quadPoints) - topY(a.quadPoints) || a.rect[0] - b.rect[0];
-      });
+      // Unified sort key: top Y in PDF space (bottom-left origin; larger = visually higher on page)
+      const annotTopY = a => a.subtype === 'Square'
+        ? a.rect[3]
+        : Array.isArray(a.quadPoints[0])
+          ? Math.max(...a.quadPoints.flatMap(q => q.map(p => p.y)))
+          : Math.max(...Array.from(a.quadPoints).filter((_, i) => i % 2 === 1));
 
-      for (const annot of highlights) {
+      const allAnnots = [...highlights, ...squares];
+      allAnnots.sort((a, b) => annotTopY(b) - annotTopY(a) || a.rect[0] - b.rect[0]);
+
+      for (const annot of allAnnots) {
         const color  = classifyColor(annot.color);
-        const action = COLOR_ACTION[color];
+        const action = annot.subtype === 'Square' ? SQUARE_COLOR_ACTION[color] : COLOR_ACTION[color];
         if (action === 'skip') continue;
 
-        const text = cleanText(extractTextForRects(textItems, quadPointsToRects(annot.quadPoints)));
-        if (!text) continue; // scanned/image-only PDF page
-
-        const id = highlightId(relPath, pageNum - 1, annot.quadPoints, text);
-        const h  = { id, text, page: pageNum, color };
+        let h;
+        if (annot.subtype === 'Square') {
+          const id = rectId(relPath, pageNum - 1, annot.rect);
+          h = { kind: 'rect', id, rect: annot.rect, annotId: annot.id, pageIndex: pageNum - 1, pdfPath, page: pageNum, color };
+        } else {
+          const text = cleanText(extractTextForRects(textItems, quadPointsToRects(annot.quadPoints)));
+          if (!text) continue;
+          const id = highlightId(relPath, pageNum - 1, annot.quadPoints, text);
+          h = { kind: 'text', id, text, page: pageNum, color };
+        }
 
         if (action === 'stage') {
-          // Orange: accumulate — nothing pushed yet
           stagingBuffer.push(h);
-          if (DRY_RUN) console.log(`  [p.${pageNum}] 🟠 staged: ${text.slice(0, 70)}…`);
+          if (DRY_RUN) {
+            if (h.kind === 'rect') console.log(`  [p.${pageNum}] 🟠 staged rect (${Math.round(h.rect[2]-h.rect[0])}×${Math.round(h.rect[3]-h.rect[1])} pts)`);
+            else                   console.log(`  [p.${pageNum}] 🟠 staged: ${h.text.slice(0, 70)}…`);
+          }
 
         } else if (action === 'commit') {
-          // Green: add green text as the final segment, then commit the whole buffer
           stagingBuffer.push(h);
           if (stagingBuffer.length === 1) {
-            // Green with no staged oranges — treat as immediate individual extract
-            const ok = await pushImmediate(elementId, h);
-            if (!ok) pageError = true;
-            else docPushed++;
+            // Lone green with no staged oranges
+            if (h.kind === 'rect') {
+              if (DRY_RUN) { console.log(`  [p.${pageNum}] 🟢 would extract rect (lone green)`); docPushed++; }
+              else {
+                const imgPath = await renderRectToPng(doc, pdfPath, h.pageIndex, h.rect, h.annotId);
+                if (imgPath) { const ok = await pushImmediateRect(elementId, h, imgPath); if (!ok) pageError = true; else docPushed++; }
+              }
+            } else {
+              const ok = await pushImmediate(elementId, h);
+              if (!ok) pageError = true; else docPushed++;
+            }
+            stagingBuffer.length = 0;
           } else {
-            const members = stagingBuffer.splice(0); // take all, clear buffer
+            const members = stagingBuffer.splice(0);
             if (DRY_RUN) {
-              const preview = members.map(m => m.text.slice(0, 30)).join(' / ');
+              const preview = members.map(m => m.kind === 'rect' ? `[rect p.${m.page}]` : m.text.slice(0, 30)).join(' / ');
               console.log(`  [p.${pageNum}] 🟢 would commit ${members.length} segments: ${preview.slice(0, 80)}…`);
             } else {
-              const ok = await pushGroup(elementId, members);
-              if (!ok) pageError = true;
-              else docPushed++;
+              const ok = await pushGroup(elementId, members, doc);
+              if (!ok) pageError = true; else docPushed++;
             }
           }
 
         } else if (action === 'extract') {
           // Yellow: push immediately, independent of staging buffer
-          if (DRY_RUN) {
-            console.log(`  [p.${pageNum}] 🟡 ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`);
-            docPushed++;
+          if (h.kind === 'rect') {
+            if (DRY_RUN) { console.log(`  [p.${pageNum}] 🟡 would extract rect (${Math.round(h.rect[2]-h.rect[0])}×${Math.round(h.rect[3]-h.rect[1])} pts)`); docPushed++; }
+            else {
+              const imgPath = await renderRectToPng(doc, pdfPath, h.pageIndex, h.rect, h.annotId);
+              if (imgPath) { const ok = await pushImmediateRect(elementId, h, imgPath); if (!ok) pageError = true; else docPushed++; }
+            }
           } else {
-            const ok = await pushImmediate(elementId, h);
-            if (!ok) pageError = true;
-            else docPushed++;
+            if (DRY_RUN) { console.log(`  [p.${pageNum}] 🟡 ${h.text.slice(0, 80)}${h.text.length > 80 ? '…' : ''}`); docPushed++; }
+            else { const ok = await pushImmediate(elementId, h); if (!ok) pageError = true; else docPushed++; }
           }
         }
       }

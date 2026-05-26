@@ -270,7 +270,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
@@ -286,7 +286,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
       var builder = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
@@ -310,7 +310,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
       var builder  = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
@@ -336,15 +336,21 @@ namespace SuperMemoAssistant.Plugins.SMGo
           else if (kind == "image")
           {
             var dataUrl = seg["dataUrl"]?.ToString() ?? "";
+            var imgPath = seg["imgPath"]?.ToString() ?? "";
             if (!string.IsNullOrEmpty(dataUrl))
               sb.Append($"<img src=\"{dataUrl}\" style=\"max-width:100%;height:auto\">");
+            else if (!string.IsNullOrEmpty(imgPath))
+            {
+              var fileUri = "file:///" + imgPath.Replace('\\', '/');
+              sb.Append($"<img src=\"{fileUri}\" style=\"max-width:100%;height:auto\">");
+            }
           }
         }
         if (sb.Length == 0) return false;
         sb.Append("<span />");
         var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
           .WithParent(parentId).DoNotDisplay();
-        Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+        Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
         return true;
       }
 
@@ -354,7 +360,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var html = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var simpleBuilder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, simpleBuilder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, simpleBuilder);
       return true;
     }
 
@@ -366,7 +372,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var html    = $"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\"><span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
@@ -452,7 +458,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
         .WithParent(parentId).DoNotDisplay();
-      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.CreateSubfolders, builder);
+      Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
