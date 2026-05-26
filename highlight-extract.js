@@ -194,8 +194,9 @@ function extractTextForRects(textItems, quadRects) {
 
 function cleanText(raw) {
   return raw
-    .replace(/­/g, '')       // soft hyphens (common in German justified text)
-    .replace(/-\s*\n\s*/g, '')    // hyphenated line breaks
+    .replace(/­/g, '')              // soft hyphens U+00AD
+    .replace(/-\s*\n\s*/g, '')      // hyphenated line breaks (when items contain \n)
+    .replace(/(\w)- (\w)/g, '$1$2') // hyphen-space artifacts from join(' ') on split words
     .replace(/\s+/g, ' ')
     .trim();
 }
