@@ -356,7 +356,7 @@ function doReveal() {
   const answerEl = document.getElementById('card-answer');
   if (answerEl) {
     answerEl.style.display = '';
-    setTimeout(() => answerEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+    cardArea.querySelector('.card')?.classList.add('qa-revealed');
   }
   showGrades();
 }
