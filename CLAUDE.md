@@ -168,6 +168,13 @@ Rectangle color logic is intentionally permissive: Xodo's default rect color is 
 - Create `node_modules/canvas/index.js` → `module.exports = require("@napi-rs/canvas");`
 - Create `node_modules/canvas/package.json` → `{"name":"canvas","version":"2.11.2","main":"index.js"}`
 
+### Two-column PDF handling
+Harrison's Neurology (7.pdf) uses a two-column layout. Both columns share overlapping Y coordinates, so text items from left and right columns appear at the same Y positions. `extractTextForRects()` uses `TOLERANCE=3` and matches text items by both Y-range and X-range against `quadRects` — this works correctly for two-column PDFs without any special handling.
+
+**Hyphenation artifacts**: Words split at PDF line breaks are stored as separate text items (e.g., `"asymmet-"` and `"ric"`). After `join(' ')` they become `"asymmet- ric"`. `cleanText()` fixes this with `(\w)- (\w)` → `$1$2`.
+
+**Cross-page annotation gaps**: Highlights spanning page boundaries create two separate annotations (one per page). Text between them (e.g., the continuation of a split word on the next page's annotation start) is unrecoverable — the two annotations have no awareness of each other. This is expected behavior, not a bug.
+
 ### highlight-extract.js internals
 - `highlightId()` — SHA1 of `{relPath, pageIndex, roundedQuadPoints, text}` → `hl-{hex16}`
 - `rectId()` — SHA1 of `{relPath, pageIndex, roundedRect}` → `rect-{hex16}`
@@ -210,8 +217,17 @@ Rectangle color logic is intentionally permissive: Xodo's default rect color is 
 ### Q&A pair detection (sm-parser.js)
 Cards are merged in `getTodayCards()` post-processing:
 1. Topic card body ends with `?`
-2. Card at `id+1` exists, is type `topic`, and does NOT end with `?`
+2. Card at `id+1` exists, is type `topic`, does NOT end with `?`, and has non-empty body
 → `card.answer = answer.body`, `card.answerPairId = answer.id`, answer card removed from list
+
+### Q&A rendering and interaction (app.js + style.css)
+- Question shown immediately; "Show Answer" button calls `doReveal()` which unhides `#card-answer`
+- On reveal, `.card` gets class `qa-revealed` → adaptive split layout:
+  - `.card.qa-revealed` is `overflow-y: hidden` (no single scroll for the whole card)
+  - `.card.qa-revealed .card-body.selectable` (question): `flex: 0 0 auto; max-height: 32vh; overflow-y: auto`
+  - `.card.qa-revealed .card-answer` (answer block): `flex: 1; overflow-y: auto`
+- Answer section has a horizontal-rule-style "Answer" divider (`.answer-divider`)
+- `dismissCard()` dismisses both `card.id` and `card.answerPairId` — both IDs logged to Supabase so the answer element is also removed from Outstanding
 
 ### localStorage keys
 | Key | Purpose |
@@ -240,7 +256,7 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v45` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Cache name: `smgo-v47` — **must bump on every meaningful deploy** or phone will serve stale JS.
 Shell: `['./', './index.html', './app.js', './style.css', './manifest.json', './favicon.ico', './icons/icon-192.png', './icons/icon-512.png']`
 
 ### Manifest
@@ -332,3 +348,11 @@ git push
 28. **`@napi-rs/canvas` + pdfjs ARM64 shim** — pdfjs-dist requires a module named exactly `canvas` for server-side rendering. The standard `canvas` npm package has no ARM64 Windows prebuilts. Solution: install `@napi-rs/canvas` and create a shim at `node_modules/canvas/index.js` containing `module.exports = require("@napi-rs/canvas");` with matching `package.json`. This must be recreated after `npm ci` clears node_modules.
 
 29. **SM element ID ≠ PDF filename number (usually)** — In SM's Incremental PDF Reader, PDF files are stored in the elements folder as `{elementId}.pdf`. So `7.pdf` corresponds to SM element ID 7. The `getElementId()` function parses the filename integer and uses it as `parentId` for new child extracts — this is correct.
+
+30. **Q&A dismiss must cover both element IDs** — A Q&A pair merges two SM elements (question at `id`, answer at `id+1`). `dismissCard()` must dismiss both `card.id` and `card.answerPairId`. Dismissing only the question card leaves the answer in Outstanding; it surfaces as an orphan topic card on the next review.
+
+31. **Q&A adaptive layout via `qa-revealed` class** — On reveal, add class `qa-revealed` to `.card`. Use `flex: 0 0 auto; max-height: 32vh; overflow-y: auto` on the question block and `flex: 1; overflow-y: auto` on the answer block. Without this, the question fills most of the card and the answer is squeezed into a few lines at the bottom.
+
+32. **Hyphenation artifacts in PDF-extracted text** — Two-column PDFs (e.g. Harrison's Neurology) store words split at line breaks as separate text items: `"asymmet-"` and `"ric"`. After `join(' ')` they become `"asymmet- ric"`. Regex `/-\n-/` never matches (no `\n` after join). Fix in `cleanText()`: `.replace(/(\w)- (\w)/g, '$1$2')` catches the hyphen-space artifact.
+
+33. **Cross-page annotation gaps are unrecoverable** — When a highlight spans a page boundary, pdfjs creates two annotations (one per page). The text between where the first annotation ends on page N and where the second begins on page N+1 is not captured. "and distal?" at the start of a page-584 annotation is correct behavior — the preceding text was on page 583 and not highlighted.
