@@ -65,6 +65,58 @@ let idx       = 0;
 let grades    = [];
 let dismisses = [];
 let revealed  = false;
+let activeCollection = null;
+let availableCollections = [];
+let collectionEpoch = 0;
+const PROTOCOL_VERSION = 2;
+
+function collectionToken(id) {
+  return String(id || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+}
+
+function activateCollection(data, fallbackId = null) {
+  const id = data?.collectionId || data?.collection_id || fallbackId;
+  if (!id) throw new Error('This export has no collection ID. Re-export it with the current SMGo version.');
+  if (activeCollection && activeCollection.id !== id) cancelCollectionBoundUi();
+  activeCollection = {
+    id,
+    name: data?.collectionName || data?.collection_name || id,
+  };
+  collectionEpoch++;
+  localStorage.setItem('smgo_active_collection', id);
+}
+
+function collectionStorageKey(name, collectionId = activeCollection?.id) {
+  if (!collectionId) throw new Error('No active collection');
+  return `smgo_${collectionToken(collectionId)}_${name}`;
+}
+
+function collectionPayload(payload = {}, collectionId = payload.collectionId || activeCollection?.id) {
+  if (!collectionId) throw new Error('No active collection');
+  if (payload.collectionId && payload.collectionId !== collectionId) {
+    throw new Error('A queued action cannot be moved to another collection');
+  }
+  if (payload.protocolVersion && payload.protocolVersion !== PROTOCOL_VERSION) {
+    throw new Error('A queued action has an unsupported protocol version');
+  }
+  return { ...payload, protocolVersion: payload.protocolVersion || PROTOCOL_VERSION, collectionId };
+}
+
+function queueRow(type, payload, suffix, collectionId = payload.collectionId || activeCollection?.id) {
+  const body = collectionPayload(payload, collectionId);
+  const unique = suffix || body.id || `${body.elementId || 'item'}-${body.timestamp || Date.now()}`;
+  const commandId = `${collectionToken(collectionId)}--${type}--${unique}`;
+  return {
+    id: commandId,
+    type,
+    collection_id: collectionId,
+    payload: { ...body, commandId },
+  };
+}
+
+function isCurrentCollection(collectionId, epoch = collectionEpoch) {
+  return activeCollection?.id === collectionId && collectionEpoch === epoch;
+}
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -83,6 +135,7 @@ const extractBadgeBtn= $('extract-badge-btn');
 const extractCount   = $('extract-count');
 const extractDrawer  = $('extract-drawer');
 const extractList    = $('extract-list');
+const collectionSelector = $('collection-selector');
 
 // ── Offline detection ──────────────────────────────────────────────────────
 window.addEventListener('online',  () => {
@@ -99,7 +152,6 @@ if ('serviceWorker' in navigator)
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
   showScreen('loading');
-  loadExtracts();
 
   // Supabase: try cloud cards first — works from any network
   if (getSupabase() && await initFromSupabase()) return;
@@ -109,9 +161,11 @@ async function init() {
     await initStatic();
   } else {
     serverUrlWrap.innerHTML = `Server: <a href="${getServerUrl()}" target="_blank">${getServerUrl()}</a>`;
-    await syncAllPending();
-    await syncAllExtracts();
     await initServer();
+    if (activeCollection) {
+      await syncAllPending();
+      await syncAllExtracts();
+    }
   }
 }
 
@@ -121,13 +175,25 @@ async function initFromSupabase() {
   try {
     const today = localDate();
     const res = await fetch(
-      `${supa.url}/rest/v1/smgo_daily?date=eq.${today}&select=data`,
+      `${supa.url}/rest/v1/smgo_daily?review_date=eq.${today}&select=collection_id,data&order=collection_id`,
       { headers: { apikey: supa.key, Authorization: `Bearer ${supa.key}` } }
     );
     if (!res.ok) return false;
     const rows = await res.json();
-    if (!rows.length || !rows[0].data?.cards?.length) return false;
-    cards = rows[0].data.cards;
+    const usable = rows.filter(r =>
+      r.collection_id &&
+      r.data?.protocolVersion === PROTOCOL_VERSION &&
+      r.data?.collectionId === r.collection_id &&
+      Array.isArray(r.data?.cards)
+    );
+    if (!usable.length) return false;
+    availableCollections = usable;
+    const savedId = localStorage.getItem('smgo_active_collection');
+    const selected = usable.find(r => r.collection_id === savedId) || usable[0];
+    activateCollection(selected.data, selected.collection_id);
+    renderCollectionSelector(selected.collection_id);
+    loadExtracts();
+    cards = selected.data.cards;
     idx   = 0;
     serverUrlWrap.textContent = `Supabase · ${cards.length} cards`;
     loadStoredProgress();
@@ -139,28 +205,53 @@ async function initFromSupabase() {
   } catch { return false; }
 }
 
+function renderCollectionSelector(selectedId) {
+  if (!collectionSelector) return;
+  collectionSelector.replaceChildren();
+  if (availableCollections.length < 2) { collectionSelector.style.display = 'none'; return; }
+  for (const row of availableCollections) {
+    const option = document.createElement('option');
+    option.value = row.collection_id;
+    option.textContent = row.data?.collectionName || row.collection_id;
+    option.selected = row.collection_id === selectedId;
+    collectionSelector.appendChild(option);
+  }
+  collectionSelector.style.display = '';
+}
+
+function activateAndLoadCards(data, fallbackId, source) {
+  activateCollection(data, fallbackId);
+  loadExtracts();
+  cards = data.cards || [];
+  idx = 0;
+  serverUrlWrap.textContent = `${source} · ${activeCollection.name} · ${cards.length} cards`;
+  if (!cards.length) { showScreen('done', 'No items due today!', ''); return; }
+  loadStoredProgress();
+  showScreen('review');
+  renderCard();
+}
+
+collectionSelector?.addEventListener('change', () => {
+  const row = availableCollections.find(r => r.collection_id === collectionSelector.value);
+  if (!row) return;
+  activateAndLoadCards(row.data, row.collection_id, 'Supabase');
+  syncAllPending().catch(() => {});
+  syncAllExtracts().catch(() => {});
+});
+
 async function initStatic() {
   try {
     const res  = await fetch('./data/today.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (!data.cards || data.cards.length === 0) {
-      showScreen('done', 'No items due today!', '');
-      return;
-    }
-    cards = data.cards;
-    idx   = 0;
-    loadStoredProgress();
-    showScreen('review');
-    renderCard();
+    activateAndLoadCards(data, null, 'Static export');
   } catch (err) {
     try {
       const cached = await caches.match('./data/today.json');
       if (cached) {
         const data = await cached.json();
-        if (data.cards && data.cards.length) {
-          cards = data.cards; idx = 0;
-          loadStoredProgress(); showScreen('review'); renderCard();
+        if (data.cards) {
+          activateAndLoadCards(data, null, 'Cached export');
           setSyncStatus('Offline – using cached items', 'fail');
           return;
         }
@@ -176,20 +267,14 @@ async function initServer() {
   try {
     const res  = await fetch(`${getServerUrl()}/api/today`);
     const data = await res.json();
-    if (!data.cards || data.cards.length === 0) {
-      showScreen('done', 'No items due today!', '');
-      return;
-    }
-    cards = data.cards; idx = 0;
-    loadStoredProgress(); showScreen('review'); renderCard();
+    activateAndLoadCards(data, null, 'Desktop server');
   } catch (err) {
     try {
       const cached = await caches.match('/api/today');
       if (cached) {
         const data = await cached.json();
-        if (data.cards && data.cards.length) {
-          cards = data.cards; idx = 0;
-          loadStoredProgress(); showScreen('review'); renderCard();
+        if (data.cards) {
+          activateAndLoadCards(data, null, 'Cached desktop server');
           setSyncStatus('Offline – using cached items', 'fail');
           return;
         }
@@ -206,48 +291,52 @@ function localDate() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-function todayKey() { return 'smgo_progress_' + localDate(); }
+function todayKey(collectionId = activeCollection?.id, date = localDate()) {
+  return collectionStorageKey('progress_' + date, collectionId);
+}
 
 // Persistent cross-day dismiss store — survives session reloads.
-const DISMISSED_KEY    = 'smgo_dismissed';
+function dismissedKey(collectionId = activeCollection?.id) { return collectionStorageKey('dismissed', collectionId); }
 const DISMISSED_TTL_MS = 365 * 864e5;  // 1 year — generous, unsynced entries are never pruned
 
 // Raw store — never filtered. Use this any time you intend to write back.
-function loadDismissedRaw() {
-  try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); }
+function loadDismissedRaw(collectionId = activeCollection?.id) {
+  try { return JSON.parse(localStorage.getItem(dismissedKey(collectionId)) || '[]'); }
   catch { return []; }
 }
 // Filtered view for read-only consumers (the done set).
 // Only prunes entries that are BOTH synced AND older than TTL — unsynced entries
 // are kept forever so SM always gets the dismiss even after weeks offline.
-function loadDismissed() {
+function loadDismissed(collectionId = activeCollection?.id) {
   const cutoff = Date.now() - DISMISSED_TTL_MS;
-  return loadDismissedRaw().filter(d =>
+  return loadDismissedRaw(collectionId).filter(d =>
     !d.synced || new Date(d.timestamp).getTime() > cutoff
   );
 }
-function saveDismissed(list) {
-  localStorage.setItem(DISMISSED_KEY, JSON.stringify(list));
+function saveDismissed(list, collectionId = activeCollection?.id) {
+  localStorage.setItem(dismissedKey(collectionId), JSON.stringify(list));
 }
 
-function loadStoredProgress() {
+function loadStoredProgress(collectionId = activeCollection?.id) {
   try {
-    const saved = JSON.parse(localStorage.getItem(todayKey()) || '{}');
+    const saved = JSON.parse(localStorage.getItem(todayKey(collectionId)) || '{}');
     grades    = saved.grades    || [];
     dismisses = saved.dismisses || [];
     const norm = v => String(v);
     const done = new Set([
       ...grades.map(g => norm(g.elementId)),
       ...dismisses.map(d => norm(d.elementId)),
-      ...loadDismissed().map(d => norm(d.elementId)),
+      ...loadDismissed(collectionId).map(d => norm(d.elementId)),
     ]);
     const next = cards.findIndex(c => !done.has(norm(c.id)));
     idx = next === -1 ? cards.length : next;
   } catch { grades = []; dismisses = []; }
 }
-function saveProgress() {
-  const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
-  localStorage.setItem(todayKey(), JSON.stringify({ ...prev, grades, dismisses, ts: Date.now() }));
+function saveProgress(collectionId = activeCollection?.id, gradesToSave = grades, dismissesToSave = dismisses) {
+  const key = todayKey(collectionId);
+  const prev = JSON.parse(localStorage.getItem(key) || '{}');
+  localStorage.setItem(key, JSON.stringify({ ...prev, date: localDate(), collectionId,
+    protocolVersion: PROTOCOL_VERSION, grades: gradesToSave, dismisses: dismissesToSave, ts: Date.now() }));
 }
 
 // ── Screen management ──────────────────────────────────────────────────────
@@ -369,19 +458,21 @@ function skipCard() {
 function dismissCard() {
   const card = cards[idx];
   if (!card) return;
+  const originId = activeCollection?.id;
+  if (!originId) return;
   const now = new Date().toISOString();
   const ids = [card.id];
   if (card.answerPairId) ids.push(card.answerPairId);
-  const dList = loadDismissedRaw();
+  const dList = loadDismissedRaw(originId);
   for (const eid of ids) {
-    dismisses.push({ elementId: eid, timestamp: now });
-    dList.push({ elementId: eid, timestamp: now, synced: false });
+    dismisses.push(collectionPayload({ elementId: eid, timestamp: now }, originId));
+    dList.push(collectionPayload({ elementId: eid, timestamp: now, synced: false }, originId));
   }
-  saveProgress();
-  saveDismissed(dList);
+  saveProgress(originId);
+  saveDismissed(dList, originId);
   showFlash('Dismissed');
   // Attempt upload now; syncAllDismissed handles retry if offline
-  syncAllDismissed().catch(() => {});
+  syncAllDismissed(originId).catch(() => {});
   idx++;
   renderCard();
 }
@@ -411,6 +502,8 @@ function openPriorityModal() {
 async function applyPriority() {
   const card = cards[idx];
   if (!card || _pendingPriority === null) return;
+  const originId = activeCollection?.id;
+  if (!originId) return;
   const pct = _pendingPriority;
   $('priority-modal').classList.remove('open');
   // Update local card data so badge refreshes immediately
@@ -418,11 +511,8 @@ async function applyPriority() {
   renderCard();
   const supa = getSupabase();
   if (supa) {
-    await supaUpsert('smgo_queue', {
-      id:      `priority-${card.id}-${Date.now()}`,
-      type:    'priority',
-      payload: { elementId: card.id, priority: pct },
-    });
+    await supaUpsert('smgo_queue', queueRow('priority',
+      { elementId: card.id, priority: pct, timestamp: new Date().toISOString(), collectionId: originId }, undefined, originId));
   }
   showFlash(`Priority set to ${pct}%`);
 }
@@ -512,12 +602,14 @@ const GRADE_LABELS = [['0','Null'],['1','Bad'],['2','Fail'],['3','Pass'],['4','G
 
 function applyGrade(grade) {
   const c = cards[idx];
-  grades.push({ elementId: c.id, grade, timestamp: new Date().toISOString() });
+  const originId = activeCollection?.id;
+  if (!originId) return;
+  grades.push(collectionPayload({ elementId: c.id, grade, timestamp: new Date().toISOString() }, originId));
   // Grade the answer element with the same grade when it's a Q&A pair
   if (c.answerPairId) {
-    grades.push({ elementId: c.answerPairId, grade, timestamp: new Date().toISOString() });
+    grades.push(collectionPayload({ elementId: c.answerPairId, grade, timestamp: new Date().toISOString() }, originId));
   }
-  saveProgress();
+  saveProgress(originId);
   idx++;
   renderCard();
 }
@@ -544,22 +636,23 @@ async function syncAndDone() {
 
 async function pushTodayGrades() {
   if (grades.length === 0) return true;
+  const originId = activeCollection?.id;
+  const originEpoch = collectionEpoch;
+  const reviews = grades.slice();
+  if (!originId) return false;
 
   // Try Supabase first (works anywhere)
   const supa = getSupabase();
   if (supa) {
     let allOk = true;
-    for (const g of grades) {
-      const ok = await supaUpsert('smgo_queue', {
-        id:      `grade-${g.elementId}-${g.timestamp}`,
-        type:    'grade',
-        payload: g,
-      });
+    for (const g of reviews) {
+      const ok = await supaUpsert('smgo_queue', queueRow('grade', g, undefined, originId));
       if (!ok) allOk = false;
     }
     if (allOk) {
-      const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
-      localStorage.setItem(todayKey(), JSON.stringify({ ...prev, synced: true }));
+      const key = todayKey(originId);
+      const prev = JSON.parse(localStorage.getItem(key) || '{}');
+      localStorage.setItem(key, JSON.stringify({ ...prev, synced: true }));
       return true;
     }
   }
@@ -570,12 +663,14 @@ async function pushTodayGrades() {
       const res = await fetch(`${getServerUrl()}/api/grades`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: localDate(), reviews: grades }),
+        body: JSON.stringify(collectionPayload({ date: localDate(), reviews }, originId)),
       });
       if (res.ok) {
-        const prev = JSON.parse(localStorage.getItem(todayKey()) || '{}');
-        localStorage.setItem(todayKey(), JSON.stringify({ ...prev, synced: true }));
+        const key = todayKey(originId);
+        const prev = JSON.parse(localStorage.getItem(key) || '{}');
+        localStorage.setItem(key, JSON.stringify({ ...prev, synced: true }));
       }
+      if (!isCurrentCollection(originId, originEpoch)) return res.ok;
       return res.ok;
     } catch { return false; }
   }
@@ -584,27 +679,25 @@ async function pushTodayGrades() {
 }
 
 async function syncAllPending() {
+  const originId = activeCollection?.id;
+  if (!originId) return;
   const keys = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith('smgo_progress_')) keys.push(k);
+    if (k && k.startsWith(collectionStorageKey('progress_', originId))) keys.push(k);
   }
   let total = 0;
   for (const k of keys) {
     let saved;
     try { saved = JSON.parse(localStorage.getItem(k) || '{}'); } catch { continue; }
-    if (!saved.grades || !saved.grades.length || saved.synced) continue;
+    if (saved.collectionId !== originId || !saved.grades || !saved.grades.length || saved.synced) continue;
 
     // Try Supabase first (works anywhere)
     const supa = getSupabase();
     if (supa) {
       let allOk = true;
       for (const g of saved.grades) {
-        const ok = await supaUpsert('smgo_queue', {
-          id:      `grade-${g.elementId}-${g.timestamp}`,
-          type:    'grade',
-          payload: g,
-        });
+        const ok = await supaUpsert('smgo_queue', queueRow('grade', g, undefined, originId));
         if (!ok) allOk = false;
       }
       if (allOk) {
@@ -616,12 +709,12 @@ async function syncAllPending() {
 
     // Fallback: local server
     if (!isStaticMode()) {
-      const date = k.replace('smgo_progress_', '');
+      const date = saved.date || k.slice(collectionStorageKey('progress_').length);
       try {
         const res = await fetch(`${getServerUrl()}/api/grades`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, reviews: saved.grades }),
+          body: JSON.stringify(collectionPayload({ date, reviews: saved.grades }, originId)),
         });
         if (res.ok) {
           localStorage.setItem(k, JSON.stringify({ ...saved, synced: true }));
@@ -635,28 +728,25 @@ async function syncAllPending() {
 
 let _syncDismissInFlight = false;
 
-async function syncAllDismissed() {
+async function syncAllDismissed(originId = activeCollection?.id) {
   if (_syncDismissInFlight) return;
+  if (!originId) return;
   _syncDismissInFlight = true;
   try {
     // Snapshot only the keys to attempt; don't hold the array across awaits.
-    const pending = loadDismissedRaw().filter(d => !d.synced);
+    const pending = loadDismissedRaw(originId).filter(d => !d.synced && d.collectionId === originId);
     const syncedKeys = new Set();  // `${elementId}|${timestamp}`
 
     for (const d of pending) {
       let ok = false;
       const supa = getSupabase();
       if (supa) {
-        ok = await supaUpsert('smgo_queue', {
-          id:      `dismiss-${d.elementId}-${d.timestamp}`,
-          type:    'dismiss',
-          payload: { elementId: d.elementId, timestamp: d.timestamp },
-        });
+        ok = await supaUpsert('smgo_queue', queueRow('dismiss', d, undefined, originId));
       } else if (!isStaticMode()) {
         try {
           const res = await fetch(`${getServerUrl()}/api/dismiss`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ elementId: d.elementId, timestamp: d.timestamp }),
+            body: JSON.stringify(collectionPayload({ elementId: d.elementId, timestamp: d.timestamp }, originId)),
           });
           ok = res.ok;
         } catch {}
@@ -667,14 +757,14 @@ async function syncAllDismissed() {
     if (!syncedKeys.size) return;
     // Re-read raw store right before writing — preserves any dismisses that
     // arrived via dismissCard() during our awaits above.
-    const fresh = loadDismissedRaw();
+    const fresh = loadDismissedRaw(originId);
     let mutated = false;
     for (const d of fresh) {
       if (!d.synced && syncedKeys.has(`${d.elementId}|${d.timestamp}`)) {
         d.synced = true; mutated = true;
       }
     }
-    if (mutated) saveDismissed(fresh);
+    if (mutated) saveDismissed(fresh, originId);
   } finally {
     _syncDismissInFlight = false;
   }
@@ -691,15 +781,15 @@ let pendingExtracts = [];
 let pendingItems    = [];  // cloze + Q&A
 let pendingEdits    = [];  // text/image notes
 
-function loadExtracts() {
-  try { pendingExtracts = JSON.parse(localStorage.getItem('smgo_extracts') || '[]'); }
+function loadExtracts(collectionId = activeCollection?.id) {
+  try { pendingExtracts = JSON.parse(localStorage.getItem(collectionStorageKey('extracts', collectionId)) || '[]'); }
   catch { pendingExtracts = []; }
-  try { pendingItems    = JSON.parse(localStorage.getItem('smgo_items')    || '[]'); }
+  try { pendingItems    = JSON.parse(localStorage.getItem(collectionStorageKey('items', collectionId))    || '[]'); }
   catch { pendingItems  = []; }
-  try { pendingEdits    = JSON.parse(localStorage.getItem('smgo_edits')    || '[]'); }
+  try { pendingEdits    = JSON.parse(localStorage.getItem(collectionStorageKey('edits', collectionId))    || '[]'); }
   catch { pendingEdits  = []; }
   updateExtractBadge();
-  const ls = localStorage.getItem('smgo_last_sync');
+  const ls = localStorage.getItem(collectionStorageKey('last_sync', collectionId));
   if (ls) {
     const d = new Date(ls);
     const isToday = d.toDateString() === new Date().toDateString();
@@ -710,17 +800,17 @@ function loadExtracts() {
     setSyncStatus(`Last sync: ${label}`, '');
   }
 }
-function saveExtracts() {
-  localStorage.setItem('smgo_extracts', JSON.stringify(pendingExtracts));
-  updateExtractBadge();
+function saveExtracts(collectionId = activeCollection?.id, records = pendingExtracts) {
+  localStorage.setItem(collectionStorageKey('extracts', collectionId), JSON.stringify(records));
+  if (activeCollection?.id === collectionId) updateExtractBadge();
 }
-function saveItems() {
-  localStorage.setItem('smgo_items', JSON.stringify(pendingItems));
-  updateExtractBadge();
+function saveItems(collectionId = activeCollection?.id, records = pendingItems) {
+  localStorage.setItem(collectionStorageKey('items', collectionId), JSON.stringify(records));
+  if (activeCollection?.id === collectionId) updateExtractBadge();
 }
-function saveEdits() {
-  localStorage.setItem('smgo_edits', JSON.stringify(pendingEdits));
-  updateExtractBadge();
+function saveEdits(collectionId = activeCollection?.id, records = pendingEdits) {
+  localStorage.setItem(collectionStorageKey('edits', collectionId), JSON.stringify(records));
+  if (activeCollection?.id === collectionId) updateExtractBadge();
 }
 function updateExtractBadge() {
   const n = pendingExtracts.filter(e => !e.synced).length
@@ -807,14 +897,14 @@ function captureExtract() {
   if (!text || !cards[idx]) { hideExtractToolbar(); return; }
 
   const card = cards[idx];
-  const extract = {
+  const extract = collectionPayload({
     id:          `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     parentId:    card.id,
     parentTitle: card.title,
     text,
     timestamp:   new Date().toISOString(),
     synced:      false,
-  };
+  });
 
   pendingExtracts.push(extract);
   saveExtracts();
@@ -839,6 +929,7 @@ function captureExtract() {
 let clozeWords = [];
 let clozeParentId = 0;
 let clozeParentTitle = '';
+let clozeCollectionId = null;
 
 function captureForCloze() {
   const sel  = window.getSelection();
@@ -846,6 +937,7 @@ function captureForCloze() {
   if (!text || !cards[idx]) { hideExtractToolbar(); return; }
   clozeParentId    = cards[idx].id;
   clozeParentTitle = cards[idx].title;
+  clozeCollectionId = activeCollection?.id;
   clozeWords       = text.split(/(\s+)/).map(t => ({ word: t, blank: false, isSpace: /^\s+$/.test(t) }));
   sel.removeAllRanges();
   hideExtractToolbar();
@@ -871,15 +963,18 @@ function renderClozeEditor() {
 }
 
 function saveCloze() {
+  if (!clozeCollectionId || !isCurrentCollection(clozeCollectionId)) {
+    cancelCollectionBoundUi(); showFlash('Collection changed; cloze creation was cancelled.'); return;
+  }
   if (!clozeWords.filter(w => !w.isSpace).some(w => w.blank)) {
     alert('Tap at least one word to blank it first.'); return;
   }
   const sentence = clozeWords.map(w => w.isSpace ? ' ' : w.blank ? `[${w.word}]` : w.word).join('');
-  const item = {
+  const item = collectionPayload({
     id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     type: 'cloze', parentId: clozeParentId, parentTitle: clozeParentTitle,
     sentence, timestamp: new Date().toISOString(), synced: false,
-  };
+  }, clozeCollectionId);
   pendingItems.push(item);
   saveItems();
   $('cloze-modal').classList.remove('open');
@@ -890,6 +985,7 @@ function saveCloze() {
 // ── Q&A via Gemini ──────────────────────────────────────────────────────────
 let qaParentId = 0;
 let qaParentTitle = '';
+let qaCollectionId = null;
 
 async function captureForQA() {
   const sel  = window.getSelection();
@@ -906,6 +1002,8 @@ async function captureForQA() {
 
   qaParentId    = cards[idx].id;
   qaParentTitle = cards[idx].title;
+  qaCollectionId = activeCollection?.id;
+  const qaEpoch = collectionEpoch;
   sel.removeAllRanges();
   hideExtractToolbar();
 
@@ -915,6 +1013,7 @@ async function captureForQA() {
 
   try {
     const { question, answer } = await callGemini(text, apiKey);
+    if (!isCurrentCollection(qaCollectionId, qaEpoch)) return;
     $('qa-question').value        = question;
     $('qa-answer').value          = answer;
     $('qa-loading').style.display = 'none';
@@ -1007,14 +1106,17 @@ async function callGemini(text, apiKey) {
 }
 
 function saveQA() {
+  if (!qaCollectionId || !isCurrentCollection(qaCollectionId)) {
+    cancelCollectionBoundUi(); showFlash('Collection changed; Q&A creation was cancelled.'); return;
+  }
   const question = $('qa-question').value.trim();
   const answer   = $('qa-answer').value.trim();
   if (!question || !answer) { alert('Question and answer are required.'); return; }
-  const item = {
+  const item = collectionPayload({
     id: `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     type: 'qa', parentId: qaParentId, parentTitle: qaParentTitle,
     question, answer, timestamp: new Date().toISOString(), synced: false,
-  };
+  }, qaCollectionId);
   pendingItems.push(item);
   saveItems();
   $('qa-modal').classList.remove('open');
@@ -1023,52 +1125,57 @@ function saveQA() {
 }
 
 // ── Upload / sync ──────────────────────────────────────────────────────────
-async function uploadExtract(extract) {
+async function uploadExtract(extract, originId = extract.collectionId, records = pendingExtracts) {
+  if (!originId || extract.collectionId !== originId) return;
   const qType = extract.type || 'extract'; // 'extract' or 'pdf-extract-create'
   // Try Supabase first (works from anywhere)
-  if (await supaUpsert('smgo_queue', { id: extract.id, type: qType, payload: extract })) {
-    extract.synced = true; saveExtracts(); return;
+  if (await supaUpsert('smgo_queue', queueRow(qType, extract, undefined, originId))) {
+    extract.synced = true; saveExtracts(originId, records); return;
   }
   // Fallback: local server (same-network only)
   if (!isStaticMode()) {
     try {
       const res = await fetch(`${getServerUrl()}/api/extracts`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(extract),
+        body: JSON.stringify(collectionPayload(extract, originId)),
       });
-      if (res.ok) { extract.synced = true; saveExtracts(); }
+      if (res.ok) { extract.synced = true; saveExtracts(originId, records); }
     } catch {}
   }
 }
 
-async function uploadItem(item) {
+async function uploadItem(item, originId = item.collectionId, records = pendingItems) {
+  if (!originId || item.collectionId !== originId) return;
   // Try Supabase first
-  if (await supaUpsert('smgo_queue', { id: item.id, type: item.type, payload: item })) {
-    item.synced = true; saveItems(); return;
+  if (await supaUpsert('smgo_queue', queueRow(item.type, item, undefined, originId))) {
+    item.synced = true; saveItems(originId, records); return;
   }
   // Fallback: local server
   if (!isStaticMode()) {
     try {
       const res = await fetch(`${getServerUrl()}/api/items`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
+        body: JSON.stringify(collectionPayload(item, originId)),
       });
-      if (res.ok) { item.synced = true; saveItems(); }
+      if (res.ok) { item.synced = true; saveItems(originId, records); }
     } catch {}
   }
 }
 
-async function uploadEdit(edit) {
+async function uploadEdit(edit, originId = edit.collectionId, records = pendingEdits) {
   const supa = getSupabase();
-  if (!supa) return;
-  const ok = await supaUpsert('smgo_queue', { id: edit.id, type: 'edit', payload: edit });
-  if (ok) { edit.synced = true; saveEdits(); }
+  if (!supa || !originId || edit.collectionId !== originId) return;
+  const ok = await supaUpsert('smgo_queue', queueRow('edit', edit, undefined, originId));
+  if (ok) { edit.synced = true; saveEdits(originId, records); }
 }
 
 async function syncAllExtracts() {
-  for (const e of pendingExtracts.filter(x => !x.synced)) await uploadExtract(e);
-  for (const i of pendingItems.filter(x => !x.synced))    await uploadItem(i);
-  for (const e of pendingEdits.filter(x => !x.synced))    await uploadEdit(e);
+  const originId = activeCollection?.id;
+  const extracts = pendingExtracts, items = pendingItems, edits = pendingEdits;
+  if (!originId) return;
+  for (const e of extracts.filter(x => !x.synced)) await uploadExtract(e, originId, extracts);
+  for (const i of items.filter(x => !x.synced))    await uploadItem(i, originId, items);
+  for (const e of edits.filter(x => !x.synced))    await uploadEdit(e, originId, edits);
 }
 
 function showFlash(msg) {
@@ -1092,7 +1199,7 @@ function openExtractDrawer() {
 }
 
 function updateDrawerSyncTime() {
-  const ls = localStorage.getItem('smgo_last_sync');
+  const ls = localStorage.getItem(collectionStorageKey('last_sync'));
   const el = $('extract-last-sync');
   if (!el) return;
   if (ls) {
@@ -1147,9 +1254,62 @@ $('theme-toggle').addEventListener('click', () => {
   applyTheme(next);
 });
 
+function readLegacyJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+  catch { return fallback; }
+}
+
+function tagLegacyRecords(records, collectionId) {
+  return (Array.isArray(records) ? records : []).map(record =>
+    collectionPayload({ ...record, collectionId: record.collectionId || collectionId }, collectionId));
+}
+
+function importLegacyFacharztState() {
+  const targetId = activeCollection?.id;
+  const targetName = activeCollection?.name || '';
+  if (!targetId || !/facharzt/i.test(targetName)) {
+    alert('Legacy browser state can only be imported while the Facharzt collection is selected.');
+    return;
+  }
+  const marker = collectionStorageKey('legacy_facharzt_imported', targetId);
+  if (localStorage.getItem(marker)) { alert('Facharzt legacy state was already imported for this collection.'); return; }
+  if (prompt('Type IMPORT to copy old unscoped Facharzt browser state into this collection:') !== 'IMPORT') return;
+
+  const copied = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const match = key && /^smgo_progress_(\d{4}-\d{2}-\d{2})$/.exec(key);
+    if (!match) continue;
+    const destination = todayKey(targetId, match[1]);
+    if (localStorage.getItem(destination)) continue;
+    const state = readLegacyJson(key, {});
+    localStorage.setItem(destination, JSON.stringify({ ...state, protocolVersion: PROTOCOL_VERSION,
+      collectionId: targetId, grades: tagLegacyRecords(state.grades, targetId),
+      dismisses: tagLegacyRecords(state.dismisses, targetId) }));
+    copied.push(key);
+  }
+  const arrayKeys = [['smgo_dismissed', 'dismissed'], ['smgo_extracts', 'extracts'],
+    ['smgo_items', 'items'], ['smgo_edits', 'edits']];
+  for (const [legacy, destinationName] of arrayKeys) {
+    const destination = collectionStorageKey(destinationName, targetId);
+    if (!localStorage.getItem(destination) && localStorage.getItem(legacy)) {
+      localStorage.setItem(destination, JSON.stringify(tagLegacyRecords(readLegacyJson(legacy, []), targetId)));
+      copied.push(legacy);
+    }
+  }
+  const legacyLastSync = localStorage.getItem('smgo_last_sync');
+  if (legacyLastSync && !localStorage.getItem(collectionStorageKey('last_sync', targetId)))
+    localStorage.setItem(collectionStorageKey('last_sync', targetId), legacyLastSync);
+  localStorage.setItem(marker, new Date().toISOString());
+  loadExtracts(targetId);
+  loadStoredProgress(targetId);
+  renderCard();
+  alert(`Imported ${copied.length} legacy state record(s). The old keys were left untouched.`);
+}
+
 $('settings-icon').addEventListener('click', () => {
   const choice = prompt(
-    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n\nEnter number:',
+    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n5) Import old Facharzt browser state\n\nEnter number:',
   );
   if (choice === '1') {
     const url = prompt('SMGo server URL (e.g. http://192.168.1.x:3001)', getServerUrl());
@@ -1176,6 +1336,8 @@ $('settings-icon').addEventListener('click', () => {
       if (key.trim()) localStorage.setItem('smgo_supa_key', key.trim());
       else localStorage.removeItem('smgo_supa_key');
     }
+  } else if (choice === '5') {
+    importLegacyFacharztState();
   }
 });
 
@@ -1218,6 +1380,9 @@ $('extract-clear-btn').addEventListener('click', () => {
   }
 });
 $('extract-sync-btn').addEventListener('click', async () => {
+  const originId = activeCollection?.id;
+  const originEpoch = collectionEpoch;
+  if (!originId) return;
   if (!getSupabase() && isStaticMode()) {
     alert('No sync route available.\n\nOptions:\n• Set server URL in ⚙ (same WiFi)\n• Configure Supabase in ⚙ (anywhere)');
     return;
@@ -1236,7 +1401,8 @@ $('extract-sync-btn').addEventListener('click', async () => {
   const total  = pendingExtracts.length + pendingItems.length;
   const now    = new Date();
   const time   = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  localStorage.setItem('smgo_last_sync', now.toISOString());
+  localStorage.setItem(collectionStorageKey('last_sync', originId), now.toISOString());
+  if (!isCurrentCollection(originId, originEpoch)) return;
   updateDrawerSyncTime();
   showFlash(`✓ ${synced} of ${total} synced`);
   setSyncStatus(`✓ Last sync: ${time}`, 'ok');
@@ -1244,9 +1410,21 @@ $('extract-sync-btn').addEventListener('click', async () => {
 
 // ── Edit / Add Note modal ─────────────────────────────────────────────────
 let editImageData = null;
+let editCollectionId = null;
+
+function cancelCollectionBoundUi() {
+  clozeWords = [];
+  clozeCollectionId = null;
+  qaCollectionId = null;
+  editCollectionId = null;
+  editImageData = null;
+  ['cloze-modal', 'qa-modal', 'edit-modal', 'priority-modal'].forEach(id => $(id)?.classList.remove('open'));
+  hideExtractToolbar();
+}
 
 function openEditModal() {
   if (!cards[idx]) return;
+  editCollectionId = activeCollection?.id;
   $('edit-note-text').value = '';
   editImageData = null;
   $('edit-image-preview').style.display = 'none';
@@ -1259,10 +1437,14 @@ function openEditModal() {
 async function saveEdit() {
   const card = cards[idx];
   if (!card) return;
+  const originId = editCollectionId;
+  if (!originId || !isCurrentCollection(originId)) {
+    cancelCollectionBoundUi(); showFlash('Collection changed; note was not saved.'); return;
+  }
   const text = $('edit-note-text').value.trim();
   if (!text && !editImageData) { showFlash('Add text or paste an image first.'); return; }
 
-  const rec = {
+  const rec = collectionPayload({
     id:          `edit-${card.id}-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
     elementId:   card.id,
     parentTitle: card.title,
@@ -1270,19 +1452,20 @@ async function saveEdit() {
     imageData:   editImageData || null,
     timestamp:   new Date().toISOString(),
     synced:      false,
-  };
+  }, originId);
 
   // Always persist locally first so the note is never lost
   pendingEdits.push(rec);
-  saveEdits();
+  const originRecords = pendingEdits;
+  saveEdits(originId, originRecords);
 
   $('edit-modal').classList.remove('open');
 
   // Attempt immediate Supabase upload
   const supa = getSupabase();
   if (supa) {
-    const ok = await supaUpsert('smgo_queue', { id: rec.id, type: 'edit', payload: rec });
-    if (ok) { rec.synced = true; saveEdits(); showFlash('✓ Note synced to SM'); return; }
+    const ok = await supaUpsert('smgo_queue', queueRow('edit', rec, undefined, originId));
+    if (ok) { rec.synced = true; saveEdits(originId, originRecords); showFlash('✓ Note synced to SM'); return; }
   }
   showFlash('✓ Note saved — will sync later');
 }

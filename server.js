@@ -3,15 +3,20 @@ const http  = require('http');
 const fs    = require('fs');
 const path  = require('path');
 const os    = require('os');
-const { getTodayCards, findElementFile } = require('./sm-parser');
+const { getTodayCards, findElementFile, collection } = require('./sm-parser');
 
 const PORT        = 3001;
 const PWA_DIR     = path.join(__dirname, 'docs');
-const GRADES_DIR  = path.join(__dirname, 'grades');
-const EXTRACT_DIR = path.join(__dirname, 'extracts');
+const QUEUE_DIR   = path.join(__dirname, 'queues', collection.id);
+const GRADES_DIR  = path.join(QUEUE_DIR, 'grades');
+const EXTRACT_DIR = path.join(QUEUE_DIR, 'extracts');
 
-if (!fs.existsSync(GRADES_DIR))  fs.mkdirSync(GRADES_DIR);
-if (!fs.existsSync(EXTRACT_DIR)) fs.mkdirSync(EXTRACT_DIR);
+if (!fs.existsSync(GRADES_DIR))  fs.mkdirSync(GRADES_DIR, { recursive: true });
+if (!fs.existsSync(EXTRACT_DIR)) fs.mkdirSync(EXTRACT_DIR, { recursive: true });
+
+function hasCurrentCollection(payload) {
+  return payload && payload.protocolVersion === 2 && payload.collectionId === collection.id;
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -82,6 +87,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const cards = getTodayCards();
       sendJson(res, {
+        protocolVersion: 2,
+        collectionId: collection.id,
+        collectionName: collection.name,
         date: new Date().toISOString().slice(0, 10),
         total: cards.length,
         cards,
@@ -96,6 +104,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body  = await readBody(req);
       const payload = JSON.parse(body);
+      if (!hasCurrentCollection(payload)) { sendJson(res, { error: 'Collection mismatch' }, 409); return; }
       // payload: { date, reviews: [{elementId, grade, timestamp}] }
       const dateStr = payload.date || new Date().toISOString().slice(0, 10);
       const file    = path.join(GRADES_DIR, `${dateStr}.json`);
@@ -103,7 +112,12 @@ const server = http.createServer(async (req, res) => {
       let existing = [];
       if (fs.existsSync(file)) existing = JSON.parse(fs.readFileSync(file, 'utf-8'));
       const byId = Object.fromEntries(existing.map(r => [r.elementId, r]));
-      for (const r of (payload.reviews || [])) byId[r.elementId] = r;
+      for (const r of (payload.reviews || [])) {
+        if (r.collectionId && r.collectionId !== collection.id) throw new Error('Collection mismatch');
+        r.collectionId = collection.id;
+        r.protocolVersion = 2;
+        byId[r.elementId] = r;
+      }
       fs.writeFileSync(file, JSON.stringify(Object.values(byId), null, 2));
       sendJson(res, { saved: Object.keys(byId).length });
     } catch (e) {
@@ -116,6 +130,10 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/extracts' && req.method === 'POST') {
     try {
       const extract = JSON.parse(await readBody(req));
+      if (!hasCurrentCollection(extract)) { sendJson(res, { error: 'Collection mismatch' }, 409); return; }
+      if (extract.collectionId && extract.collectionId !== collection.id) { sendJson(res, { error: 'Collection mismatch' }, 409); return; }
+      extract.collectionId = collection.id;
+      extract.protocolVersion = 2;
       const date    = new Date().toISOString().slice(0, 10);
       const file    = path.join(EXTRACT_DIR, `${date}.json`);
       let list = [];

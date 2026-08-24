@@ -1,0 +1,7 @@
+{
+  "collection": {
+    "path": "C:\\SuperMemo\\systems\\My Collection"
+  },
+  "supabaseUrl": "https://YOUR_PROJECT.supabase.co",
+  "supabaseKey": "YOUR_ANON_KEY"
+}

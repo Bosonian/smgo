@@ -1,4 +1,4 @@
-const CACHE = 'smgo-v47';
+const CACHE = 'smgo-v49';
 const SHELL = ['./', './index.html', './app.js', './style.css', './manifest.json',
                './favicon.ico', './icons/icon-192.png', './icons/icon-512.png'];
 
@@ -33,11 +33,14 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // API grade submissions (server mode only): try network, respond offline if failed
+  // API mutations must not look successful while offline. The PWA only marks a
+  // record synced on res.ok, so a synthetic 200 here would silently lose work.
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(
       fetch(e.request).catch(() =>
         new Response(JSON.stringify({ error: 'offline', queued: true }), {
+          status: 503,
+          statusText: 'Offline',
           headers: { 'Content-Type': 'application/json' },
         })
       )

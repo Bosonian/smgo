@@ -1,10 +1,11 @@
 {
   "name": "smgo",
   "version": "1.0.0",
-  "description": "SuperMemo mobile companion – serve Facharzt review queue to phone",
+  "description": "Collection-aware SuperMemo mobile companion",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.0",

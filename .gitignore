@@ -1,6 +1,8 @@
 node_modules/
 grades/
 extracts/
+queues/
+state/
 GradeApplicator/bin/
 GradeApplicator/obj/
 GradeApplicator/publish/

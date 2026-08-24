@@ -1,10 +1,15 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { loadCollectionContext } = require('./collection-context');
 
-const COLLECTION = 'C:\\SuperMemo\\systems\\Facharzt';
-const ELEM_DIR   = path.join(COLLECTION, 'elements');
-const INFO_DIR   = path.join(COLLECTION, 'info');
+let config = {};
+try { config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf-8')); }
+catch { /* The SMA plugin supplies context through environment variables. */ }
+const collection = loadCollectionContext(config);
+const COLLECTION = collection.path;
+const ELEM_DIR   = collection.elementsDir;
+const INFO_DIR   = collection.infoDir;
 
 // Read today's outstanding element IDs from Outstanding.sub
 // File is a flat array of 4-byte little-endian uint32s.
@@ -231,4 +236,7 @@ function getTodayCards() {
   return cards.filter(c => !answerIds.has(c.id));
 }
 
-module.exports = { getTodayCards, getOutstandingIds, findElementFile, findParentPdfFile, COLLECTION };
+module.exports = {
+  getTodayCards, getOutstandingIds, findElementFile, findParentPdfFile,
+  COLLECTION, collection,
+};

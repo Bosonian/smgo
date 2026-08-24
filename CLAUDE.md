@@ -55,12 +55,12 @@ C:\SuperMemo\SMGo\
 │   └── SuperMemoAssistant.Plugins.SMGo.csproj
 ├── sm-parser.js             ← reads SM Outstanding.sub + element HTML → card objects
 │                               also: getPriorityMap(), Q&A pair detection/merging
-├── server.js                ← optional Node.js server (same API as SMA plugin, port 3001)
+├── server.js                ← limited legacy LAN server (grades/extracts + card serving only)
 ├── export.js                ← manual: generates today.json + git push
 ├── export-cloud.js          ← auto: pushes today's cards to Supabase (run by plugin on startup)
 ├── highlight-extract.js     ← scans SM element PDFs for annotations → pushes to Supabase
 │                               run automatically every 5 min by Task Scheduler
-├── highlight-extract-state.json  ← mtime cache per PDF — GITIGNORED
+├── state/highlight-extract-<collection-id>.json  ← mtime cache per collection — GITIGNORED
 ├── config.json              ← Supabase credentials — GITIGNORED, never commit
 └── .gitignore
 ```
@@ -69,7 +69,9 @@ C:\SuperMemo\SMGo\
 
 ## SM Collection
 
-- Path: `C:\SuperMemo\systems\Facharzt`
+- The active collection is detected by the SMA plugin. Do not configure a
+  collection path in source code; manual Node runs use `collection.path` in
+  ignored `config.json`.
 - Element files: `elements/{floor((id-1)/10)}/{id}.htm` (ids 1-10 in root)
 - Outstanding elements: `info/Outstanding.sub` — flat array of 4-byte little-endian uint32 IDs
 - Card types parsed: `topic`, `cloze`, `pdf-extract`, `image`
@@ -81,8 +83,8 @@ C:\SuperMemo\SMGo\
 - Project URL: `https://psqbpimlszjhpbdckwsj.supabase.co`
 - Anon key: in `config.json` (key: `supabaseKey`)
 - Tables:
-  - `smgo_queue` — pending extracts/items/grades (`id text PK, type text, payload jsonb, applied bool`)
-  - `smgo_daily` — today's cards (`date text PK, data jsonb`)
+  - `smgo_queue` — collection-scoped commands (`id text PK, collection_id, type, payload jsonb, applied bool`)
+  - `smgo_daily` — collection-scoped exports (`collection_id, review_date` composite key, `data jsonb`)
 - Both tables have RLS policy `"open"` (allow all — personal project)
 - `smgo_setup()` RPC function auto-creates tables if missing; called by `export-cloud.js` on every run
 - PWA localStorage keys for Supabase: `smgo_supa_url`, `smgo_supa_key`
@@ -93,13 +95,13 @@ C:\SuperMemo\SMGo\
 
 - **Port:** 3001 (HttpListener on `http://+:3001/`)
 - **DataDir:** `C:\SuperMemo\SMGo`
-- **CollectionInfoDir:** `C:\SuperMemo\systems\Facharzt\info`
+- **CollectionInfoDir:** `<active collection>\info` (derived by the plugin)
 - **DLL install path:** `C:\Users\deepak\SuperMemoAssistant\Plugins\Packages\SuperMemoAssistant.Plugins.SMGo.1.0.0\lib\net472\`
 - **Build:** `"C:\Program Files\dotnet\dotnet.exe" build -c Release` (MSBuild v4 won't work — SDK-style project requires dotnet CLI)
 - **Config file:** reads `config.json` at startup for Supabase credentials
 - **On SM open:** waits 5s → runs `export-cloud.js` then `highlight-extract.js` via `cmd.exe /c node`
 - **Supabase poller:** starts 15s after SM open, then every 30s — fetches `applied=false` rows, applies, PATCHes `applied=true`
-- **File watchers:** `grades/`, `extracts/`, `items/`, `dismisses/` — local fallback for LAN-only sync
+- **File watchers:** `queues/<collection-id>/{grades,extracts,items,dismisses}` — local fallback for LAN-only sync
 - **Routes:** GET `/api/today`, POST `/api/grades`, POST `/api/extracts`, GET `/api/extracts`, POST `/api/items`, POST `/api/dismiss`, POST `/api/apply`, GET `/api/images/:id`
 
 ### Applying items to SM
@@ -179,7 +181,7 @@ Harrison's Neurology (7.pdf) uses a two-column layout. Both columns share overla
 - `highlightId()` — SHA1 of `{relPath, pageIndex, roundedQuadPoints, text}` → `hl-{hex16}`
 - `rectId()` — SHA1 of `{relPath, pageIndex, roundedRect}` → `rect-{hex16}`
 - `groupId()` — SHA1 of ordered member IDs → `grp-{hex16}` (stable across re-runs)
-- `mtime` cache in `highlight-extract-state.json` — skip unmodified PDFs; **not updated in `--dry-run` mode**
+- `mtime` cache in `state/highlight-extract-<collection-id>.json` — skip unmodified PDFs; **not updated in `--dry-run` mode**. Legacy Facharzt state requires one explicit `--import-legacy-highlight-state` run.
 - Sync-conflict files (`.sync-conflict-*`) filtered out before processing
 - Supabase push uses `Prefer: resolution=ignore-duplicates` — fully idempotent
 
@@ -199,7 +201,7 @@ Harrison's Neurology (7.pdf) uses a two-column layout. Both columns share overla
 - **Windows executable:** `C:\Users\deepak\AppData\Local\Microsoft\WinGet\Packages\Syncthing.Syncthing_...\syncthing.exe`
 - **Web UI:** `http://127.0.0.1:8384` (API key in config)
 - **Auto-start:** Task Scheduler job `Syncthing` at logon, `--no-browser` flag
-- **Folder ID:** `sm-elements` → `C:\SuperMemo\systems\Facharzt\elements` (Send & Receive)
+- **Folder ID:** `sm-elements` → `<active collection>\elements` (Send & Receive)
 - **Devices:** Windows (DEEPAKBOSA055), S7 Tab (`L7IMDJC-…`), S25 Ultra (`5LYUWTW-…`)
 - **Topology:** full mesh (Windows↔Tab, Windows↔S25, Tab↔S25 direct)
 - Android: use **Syncthing-Fork** (Play Store), set battery to **Unrestricted** or it stops in background
@@ -331,7 +333,7 @@ git push
 
 20. **Xodo quadPoints format differs from PDF spec** — Standard PDF highlight annotations store quadPoints as a flat array of numbers (8 per quad). Xodo stores them as an array of arrays of `{x, y}` objects: `[[{x,y}×4], ...]`. Always handle both formats. Also: Xodo colors are 0–255 integer TypedArrays, not 0–1 floats — normalize before classifying.
 
-21. **dry-run must not update mtime state** — If `highlight-extract.js --dry-run` writes to `highlight-extract-state.json`, subsequent real runs will skip those PDFs. Always guard state writes with `if (!DRY_RUN)`.
+21. **dry-run must not update mtime state** — If `highlight-extract.js --dry-run` writes to the collection-scoped `state/highlight-extract-<collection-id>.json`, subsequent real runs will skip those PDFs. Always guard state writes with `if (!DRY_RUN)`.
 
 22. **Task Scheduler needs full path to node** — Scheduled tasks run in a stripped environment that may not have user PATH. Use `C:\Program Files\nodejs\node.exe` as the executable, not just `node`.
 
@@ -356,3 +358,9 @@ git push
 32. **Hyphenation artifacts in PDF-extracted text** — Two-column PDFs (e.g. Harrison's Neurology) store words split at line breaks as separate text items: `"asymmet-"` and `"ric"`. After `join(' ')` they become `"asymmet- ric"`. Regex `/-\n-/` never matches (no `\n` after join). Fix in `cleanText()`: `.replace(/(\w)- (\w)/g, '$1$2')` catches the hyphen-space artifact.
 
 33. **Cross-page annotation gaps are unrecoverable** — When a highlight spans a page boundary, pdfjs creates two annotations (one per page). The text between where the first annotation ends on page N and where the second begins on page N+1 is not captured. "and distal?" at the start of a page-584 annotation is correct behavior — the preceding text was on page 583 and not highlighted.
+
+34. **Supabase HTTPS hang causes silent export failure** — `supaRequest()` in both `export-cloud.js` and `highlight-extract.js` had no timeout. If Supabase is paused, unreachable, or slow at SM startup, the HTTPS request hangs indefinitely. The plugin's `WaitForExit(30000)` times out after 30s, gets empty stdout+stderr, and logs nothing — completely silent failure, no error in the log. The orphaned node process keeps running in the background. Fix applied (2026-06-21): `req.setTimeout(20000, () => req.destroy(new Error(...)))` added to `supaRequest` in both scripts. Now fails fast with a logged error instead of silently blocking the plugin's startup export.
+
+35. **Collections are now first-class (2026-08-24)** — Never hard-code a SuperMemo collection path. `SMGoPlugin.OnCollectionSelected()` derives the active root/path ID and passes it to Node exports. `smgo_daily` uses `(collection_id, review_date)` and every `smgo_queue` row/payload has `collection_id` / `collectionId`. The plugin filters and rechecks that ID before applying any command; untagged legacy commands are quarantined under `legacy-facharzt`. Run `supabase-migration-collections.sql` once before using the new schema. Local fallback queues are under `queues/<collection-id>/` and PWA localStorage is collection-scoped.
+
+36. **Collection identity and legacy migration (2026-08-24)** — IDs are `collection-<readable-slug>-<12-char-sha256>` over the NFC-normalized canonical Windows collection path. JS and C# share fixtures; do not supply a custom ID. Queue payloads use `protocolVersion: 2`, `collectionId`, and `commandId` matching the row ID. The plugin snapshots a collection generation before polling or reading a local file, checks again immediately before mutation, and leaves a file unacknowledged if any record fails or mismatches. PWA legacy Facharzt browser data needs an explicit `IMPORT` confirmation; legacy highlight cache needs `--import-legacy-highlight-state` once.

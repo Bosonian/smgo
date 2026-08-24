@@ -2,11 +2,16 @@
 const fs   = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { getTodayCards } = require('./sm-parser');
+const { getTodayCards, collection } = require('./sm-parser');
 
 const date    = new Date().toISOString().slice(0, 10);
 const cards   = getTodayCards();
-const payload = { date, count: cards.length, cards, generated: new Date().toISOString() };
+const payload = {
+  protocolVersion: 2,
+  collectionId: collection.id,
+  collectionName: collection.name,
+  date, count: cards.length, cards, generated: new Date().toISOString(),
+};
 
 const dataDir  = path.join(__dirname, 'docs', 'data');
 const outFile  = path.join(dataDir, 'today.json');

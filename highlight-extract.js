@@ -21,6 +21,7 @@ const fs      = require('fs');
 const path    = require('path');
 const https   = require('https');
 const crypto  = require('crypto');
+const { loadCollectionContext, collectionIdForPath } = require('./collection-context');
 
 let pdfjsLib;
 try {
@@ -42,9 +43,16 @@ if (!config.supabaseUrl || !config.supabaseKey) {
   process.exit(0);
 }
 
-const ELEMENTS_DIR = 'C:\\SuperMemo\\systems\\Facharzt\\elements';
-const STATE_FILE   = path.join(__dirname, 'highlight-extract-state.json');
+const collection   = loadCollectionContext(config);
+const ELEMENTS_DIR = collection.elementsDir;
+const STATE_DIR    = path.join(__dirname, 'state');
+const STATE_FILE   = path.join(STATE_DIR, `highlight-extract-${collection.id}.json`);
+const LEGACY_STATE_FILE = path.join(__dirname, 'highlight-extract-state.json');
 const DRY_RUN      = process.argv.includes('--dry-run');
+const IMPORT_LEGACY_STATE = process.argv.includes('--import-legacy-highlight-state');
+const configuredLegacyId = config.legacyHighlightStateCollectionPath
+  ? collectionIdForPath(config.legacyHighlightStateCollectionPath) : null;
+const isLegacyStateCollection = configuredLegacyId === collection.id || /facharzt/i.test(collection.name);
 
 const base    = config.supabaseUrl.replace(/\/$/, '');
 const headers = {
@@ -55,7 +63,7 @@ const headers = {
 
 // ── Supabase ───────────────────────────────────────────────────────────────
 
-function supaRequest(reqPath, method, body, extraHeaders = {}) {
+function supaRequest(reqPath, method, body, extraHeaders = {}, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const url  = new URL(base + reqPath);
     const data = body ? JSON.stringify(body) : '';
@@ -70,6 +78,7 @@ function supaRequest(reqPath, method, body, extraHeaders = {}) {
       res.on('data', c => raw += c);
       res.on('end', () => resolve({ status: res.statusCode, body: raw }));
     });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`Supabase request timed out after ${timeoutMs}ms`)));
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -80,10 +89,24 @@ function supaRequest(reqPath, method, body, extraHeaders = {}) {
 
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')); }
-  catch { return {}; }
+  catch {
+    if (!fs.existsSync(LEGACY_STATE_FILE)) return {};
+    if (!isLegacyStateCollection) return {};
+    if (!IMPORT_LEGACY_STATE) {
+      throw new Error('legacy highlight state exists; rerun once with --import-legacy-highlight-state to preserve processed annotations');
+    }
+    const legacy = JSON.parse(fs.readFileSync(LEGACY_STATE_FILE, 'utf-8'));
+    // Keep the legacy mtime entries exactly as they were. This is what prevents
+    // a collection-ID migration from re-queueing annotations already sent.
+    legacy.__smgoLegacyImport = { importedAt: new Date().toISOString(), source: 'highlight-extract-state.json' };
+    saveState(legacy);
+    console.log('SMGo highlight-extract: imported legacy state once; existing annotation IDs were preserved.');
+    return legacy;
+  }
 }
 
 function saveState(state) {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
   const tmp = STATE_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
   fs.renameSync(tmp, STATE_FILE);
@@ -269,8 +292,23 @@ function groupId(members) {
 async function pushRow(row) {
   if (DRY_RUN) return true;
   try {
+    // Queue IDs and payloads are both scoped. The queue ID prevents a stable
+    // PDF annotation ID from colliding with the same relative PDF in another
+    // collection; the payload lets the desktop bridge fail closed as well.
+    const commandId = `${collection.id}--${row.id}`;
+    const scopedRow = {
+      ...row,
+      id: commandId,
+      collection_id: collection.id,
+      payload: {
+        ...row.payload,
+        protocolVersion: 2,
+        collectionId: collection.id,
+        commandId,
+      },
+    };
     const res = await supaRequest(
-      '/rest/v1/smgo_queue', 'POST', row,
+      '/rest/v1/smgo_queue', 'POST', scopedRow,
       { Prefer: 'resolution=ignore-duplicates,return=minimal' }
     );
     if (res.status >= 200 && res.status < 300) return true;
@@ -366,7 +404,7 @@ async function run() {
   }
 
   const pdfPaths = collectPdfs(ELEMENTS_DIR);
-  console.log(`SMGo highlight-extract: ${pdfPaths.length} PDFs found${DRY_RUN ? ' (dry run)' : ''}`);
+  console.log(`SMGo highlight-extract: ${pdfPaths.length} PDFs found in ${collection.name}${DRY_RUN ? ' (dry run)' : ''}`);
 
   for (const pdfPath of pdfPaths) {
     const elementId = getElementId(pdfPath);

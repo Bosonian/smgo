@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -45,6 +47,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private string? _supaUrl;
     private string? _supaKey;
     private Timer?  _supaTimer;
+
+    // Set from SMA's selected collection event. Never fall back to a hard-coded
+    // collection: SuperMemo element IDs are only meaningful inside one collection.
+    private readonly object _collectionGate = new object();
+    private CollectionContext? _activeCollection;
+    private long _nextCollectionGeneration;
     private int     _pollInProgress = 0; // 0=idle, 1=running — prevents overlapping polls
 
     // ── SMA lifecycle ─────────────────────────────────────────────────────
@@ -71,6 +79,43 @@ namespace SuperMemoAssistant.Plugins.SMGo
       StartHttpServer();
       StartFileWatchers();
       StartSupabasePoller();
+    }
+
+    protected override void OnCollectionSelected(SMCollection col)
+    {
+      base.OnCollectionSelected(col);
+      try
+      {
+        CollectionContext selected;
+        lock (_collectionGate)
+        {
+          var root = col.GetRootDirPath();
+          selected = new CollectionContext(root, BuildCollectionId(root), col.Name,
+            ++_nextCollectionGeneration);
+          Volatile.Write(ref _activeCollection, selected);
+        }
+        Serilog.Log.Information("SMGo active collection: {Name} ({Id}) at {Root}",
+          selected.Name, selected.Id, selected.Root);
+        // A collection can be changed while SuperMemo is running. Move local
+        // queue watchers with it; the poller itself filters each request.
+        if (_listener != null)
+        {
+          StopFileWatchers();
+          StartFileWatchers();
+          StopSupabasePoller();
+          StartSupabasePoller();
+          Task.Delay(5000).ContinueWith(_ => { RunExportCloud(); RunHighlightExtract(); });
+        }
+      }
+      catch (Exception ex)
+      {
+        lock (_collectionGate)
+        {
+          ++_nextCollectionGeneration;
+          Volatile.Write(ref _activeCollection, null);
+        }
+        Serilog.Log.Warning(ex, "SMGo could not determine the selected collection");
+      }
     }
 
     protected override void OnSMStopped()
@@ -112,8 +157,91 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     // ── Auto-export today's cards to Supabase ────────────────────────────────
 
+    private static string BuildCollectionId(string collectionRoot)
+    {
+      var canonical = Path.GetFullPath(collectionRoot.Normalize(NormalizationForm.FormC))
+        .Replace('/', '\\').ToLowerInvariant();
+      if (!Regex.IsMatch(canonical, @"^[a-z]:\\$")) canonical = canonical.TrimEnd('\\');
+      var name = Path.GetFileName(canonical);
+      var decomposed = name.Normalize(NormalizationForm.FormKD);
+      var folded = new StringBuilder();
+      foreach (var c in decomposed)
+        if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) folded.Append(c);
+      var slug = Regex.Replace(folded.ToString().ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+      if (string.IsNullOrEmpty(slug)) slug = "collection";
+      using var sha = SHA256.Create();
+      var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(canonical));
+      var hash = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant().Substring(0, 12);
+      return $"collection-{slug}-{hash}";
+    }
+
+    private sealed class CollectionContext
+    {
+      public CollectionContext(string root, string id, string name, long generation)
+      { Root = root; Id = id; Name = name; Generation = generation; }
+      public string Root { get; }
+      public string Id { get; }
+      public string Name { get; }
+      public long Generation { get; }
+    }
+
+    private CollectionContext? CaptureCollectionContext() => Volatile.Read(ref _activeCollection);
+
+    private bool IsCurrent(CollectionContext context)
+      => ReferenceEquals(context, Volatile.Read(ref _activeCollection));
+
+    private bool HasCollectionContext()
+    {
+      if (CaptureCollectionContext() != null) return true;
+      Serilog.Log.Warning("SMGo has no active collection context; command was not processed");
+      return false;
+    }
+
+    private bool MatchesActiveCollection(string? collectionId)
+    {
+      if (!HasCollectionContext()) return false;
+      return string.Equals(collectionId, CaptureCollectionContext()?.Id, StringComparison.Ordinal);
+    }
+
+    private bool MatchesActiveCollection(JObject payload)
+      => MatchesActiveCollection(payload["collectionId"]?.ToString());
+
+    private static bool HasProtocolV2(JObject payload)
+      => payload["protocolVersion"]?.Value<int>() == 2;
+
+    private bool MatchesActiveCollection(JObject payload, CollectionContext context)
+      => IsCurrent(context)
+        && HasProtocolV2(payload)
+        && string.Equals(payload["collectionId"]?.ToString(), context.Id, StringComparison.Ordinal);
+
+    private string QueueDir(string kind)
+    {
+      if (!HasCollectionContext()) throw new InvalidOperationException("No active collection");
+      return Path.Combine(DataDir, "queues", CaptureCollectionContext()!.Id, kind);
+    }
+
+    private string QueueDir(string kind, CollectionContext context)
+      => Path.Combine(DataDir, "queues", context.Id, kind);
+
+    private bool ValidateIncomingCollection(JObject payload, HttpListenerResponse res)
+    {
+      if (MatchesActiveCollection(payload) && HasProtocolV2(payload)) return true;
+      SendJson(res, new { error = "Command collection or protocol does not match the active SuperMemo collection." }, 409);
+      return false;
+    }
+
+    private bool TryCaptureIncomingCollection(JObject payload, HttpListenerResponse res, out CollectionContext? context)
+    {
+      context = CaptureCollectionContext();
+      if (context != null && MatchesActiveCollection(payload, context)) return true;
+      SendJson(res, new { error = "Command collection or protocol does not match the active SuperMemo collection." }, 409);
+      return false;
+    }
+
     private void RunExportCloud()
     {
+      var context = CaptureCollectionContext();
+      if (context == null) return;
       var scriptPath = Path.Combine(DataDir, "export-cloud.js");
       if (!File.Exists(scriptPath)) return;
       try
@@ -128,6 +256,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
           RedirectStandardOutput = true,
           RedirectStandardError  = true,
         };
+        psi.EnvironmentVariables["SMGO_COLLECTION_PATH"] = context.Root;
+        psi.EnvironmentVariables["SMGO_COLLECTION_ID"] = context.Id;
+        psi.EnvironmentVariables["SMGO_COLLECTION_NAME"] = context.Name;
         using var proc = Process.Start(psi);
         if (proc == null) return;
         var output = proc.StandardOutput.ReadToEnd();
@@ -141,6 +272,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void RunHighlightExtract()
     {
+      var context = CaptureCollectionContext();
+      if (context == null) return;
       var scriptPath = Path.Combine(DataDir, "highlight-extract.js");
       if (!File.Exists(scriptPath)) return;
       try
@@ -155,6 +288,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
           RedirectStandardOutput = true,
           RedirectStandardError  = true,
         };
+        psi.EnvironmentVariables["SMGO_COLLECTION_PATH"] = context.Root;
+        psi.EnvironmentVariables["SMGO_COLLECTION_ID"] = context.Id;
+        psi.EnvironmentVariables["SMGO_COLLECTION_NAME"] = context.Name;
         using var proc = Process.Start(psi);
         if (proc == null) return;
         var output = proc.StandardOutput.ReadToEnd();
@@ -185,12 +321,14 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private async Task PollSupabaseAsync()
     {
       if (string.IsNullOrEmpty(_supaUrl) || string.IsNullOrEmpty(_supaKey)) return;
+      var context = CaptureCollectionContext();
+      if (context == null) return;
       // Prevent a second poll from starting while the previous one is still processing
       if (System.Threading.Interlocked.Exchange(ref _pollInProgress, 1) == 1) return;
       try
       {
         var req = new HttpRequestMessage(HttpMethod.Get,
-          $"{_supaUrl}/rest/v1/smgo_queue?applied=eq.false&order=id.asc");
+          $"{_supaUrl}/rest/v1/smgo_queue?applied=eq.false&collection_id=eq.{Uri.EscapeDataString(context.Id)}&order=id.asc");
         req.Headers.Add("apikey", _supaKey);
         req.Headers.Add("Authorization", $"Bearer {_supaKey}");
 
@@ -206,23 +344,35 @@ namespace SuperMemoAssistant.Plugins.SMGo
         {
           var id      = item["id"]?.ToString() ?? "";
           var type    = item["type"]?.ToString() ?? "";
+          var collectionId = item["collection_id"]?.ToString();
           var payload = item["payload"] as JObject;
           if (payload == null || string.IsNullOrEmpty(id)) continue;
+          if (!string.Equals(collectionId, context.Id, StringComparison.Ordinal)
+            || !MatchesActiveCollection(payload, context)
+            || !string.Equals(payload["commandId"]?.ToString(), id, StringComparison.Ordinal))
+          {
+            Serilog.Log.Warning("SMGo rejected queue item {Id}: invalid collection, protocol, or command ID", id);
+            continue;
+          }
 
           bool applied = false;
           try
           {
-            switch (type)
+            lock (_collectionGate)
             {
-              case "extract":             applied = ApplyOneExtract(payload);         break;
-              case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload);     break;
-              case "image-extract":       applied = ApplyOneImageExtract(payload);   break;
-              case "qa":                  applied = ApplyOneQA(payload);             break;
-              case "cloze":               applied = ApplyOneCloze(payload);          break;
-              case "grade":               applied = ApplyOneGrade(payload);          break;
-              case "dismiss":             applied = ApplyOneDismiss(payload);        break;
-              case "priority":            applied = ApplyOnePriority(payload);       break;
-              case "edit":                applied = ApplyOneEdit(payload);           break;
+              if (!IsCurrent(context)) break;
+              switch (type)
+              {
+                case "extract":             applied = ApplyOneExtract(payload, context);       break;
+                case "pdf-extract-create":  applied = ApplyOnePdfExtract(payload, context);    break;
+                case "image-extract":       applied = ApplyOneImageExtract(payload, context); break;
+                case "qa":                  applied = ApplyOneQA(payload, context);            break;
+                case "cloze":               applied = ApplyOneCloze(payload, context);         break;
+                case "grade":               applied = ApplyOneGrade(payload, context);         break;
+                case "dismiss":             applied = ApplyOneDismiss(payload, context);       break;
+                case "priority":            applied = ApplyOnePriority(payload, context);      break;
+                case "edit":                applied = ApplyOneEdit(payload, context);           break;
+              }
             }
           }
           catch (Exception ex)
@@ -233,8 +383,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
           // Grade, dismiss, priority: mark applied regardless of success — these
           // can silently fail (grade outside review session, element not in priority queue);
           // retrying forever creates an infinite loop and duplicates create-type items.
-          bool shouldMark = applied || type == "grade" || type == "dismiss" || type == "priority";
-          if (shouldMark) await MarkSupabaseApplied(id);
+          if (applied) await MarkSupabaseApplied(id, context);
           await Task.Delay(600);
         }
       }
@@ -245,12 +394,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
       }
     }
 
-    private async Task MarkSupabaseApplied(string id)
+    private async Task MarkSupabaseApplied(string id, CollectionContext context)
     {
       try
       {
         var patch = new HttpRequestMessage(new HttpMethod("PATCH"),
-          $"{_supaUrl}/rest/v1/smgo_queue?id=eq.{Uri.EscapeDataString(id)}");
+          $"{_supaUrl}/rest/v1/smgo_queue?id=eq.{Uri.EscapeDataString(id)}&collection_id=eq.{Uri.EscapeDataString(context.Id)}");
         patch.Headers.Add("apikey", _supaKey);
         patch.Headers.Add("Authorization", $"Bearer {_supaKey}");
         patch.Headers.Add("Prefer", "return=minimal");
@@ -262,20 +411,23 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     // ── Single-item apply helpers (shared between file-based and Supabase) ───
 
-    private bool ApplyOneExtract(JObject p)
+    private bool ApplyOneExtract(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var text     = p["text"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
       if (string.IsNullOrEmpty(text)) return false;
       var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
-    private bool ApplyOneQA(JObject p)
+    private bool ApplyOneQA(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var question = p["question"]?.ToString() ?? "";
       var answer   = p["answer"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
@@ -286,12 +438,14 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
       var builder = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
-    private bool ApplyOneCloze(JObject p)
+    private bool ApplyOneCloze(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var sentence = p["sentence"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
       if (string.IsNullOrWhiteSpace(sentence)) return false;
@@ -310,13 +464,15 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
       var builder  = new ElementBuilder(ElementType.Item, qContent, aContent)
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
     // Creates a new extract Topic as a child of the PDF root element (not the pdf-extract child)
-    private bool ApplyOnePdfExtract(JObject p)
+    private bool ApplyOnePdfExtract(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var parentId = p["parentId"]?.Value<int>() ?? 0;
       if (parentId <= 0) return false;
 
@@ -350,6 +506,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
         sb.Append("<span />");
         var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
           .WithParent(parentId).DoNotDisplay();
+        if (!IsCurrent(context)) return false;
         Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
         return true;
       }
@@ -360,36 +517,43 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var html = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var simpleBuilder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, simpleBuilder);
       return true;
     }
 
-    private bool ApplyOneImageExtract(JObject p)
+    private bool ApplyOneImageExtract(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var parentId  = p["parentId"]?.Value<int>() ?? 0;
       var imageData = p["imageData"]?.ToString() ?? "";
       if (parentId <= 0 || string.IsNullOrEmpty(imageData)) return false;
       var html    = $"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\"><span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
 
-    private bool ApplyOneGrade(JObject p)
+    private bool ApplyOneGrade(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       var grade     = p["grade"]?.Value<int>() ?? -1;
       if (elementId <= 0 || grade < 0 || grade > 5) return false;
+      if (!IsCurrent(context)) return false;
       Svc.SM.UI.ElementWdw.GoToElement(elementId);
       Thread.Sleep(400);
+      if (!IsCurrent(context)) return false;
       Svc.SM.UI.ElementWdw.AssignGrade(grade);
       Thread.Sleep(200);
       return true;
     }
 
-    private bool ApplyOneDismiss(JObject p)
+    private bool ApplyOneDismiss(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       if (elementId <= 0) return false;
       // IElement.Done() calls the SM engine directly (bypasses the UI window),
@@ -397,11 +561,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
       // removes it from the Outstanding queue permanently — equivalent to SM's Ignore.
       var element = Svc.SM.Registry.Element[elementId];
       if (element == null) return false;
+      if (!IsCurrent(context)) return false;
       return element.Done();
     }
 
-    private bool ApplyOnePriority(JObject p)
+    private bool ApplyOnePriority(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       var priority  = p["priority"]?.Value<double>() ?? -1;
       if (elementId <= 0 || priority < 0 || priority > 100) return false;
@@ -410,7 +576,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       // The position (index) of an element determines its priority rank:
       //   priority% = index / total × 100  (lower index = higher priority)
       // We reposition the element to the slot that matches the requested percentage.
-      var subFile = Path.Combine(CollectionInfoDir, "priority.sub");
+      var subFile = Path.Combine(context.Root, "info", "priority.sub");
       if (!File.Exists(subFile)) return false;
       try
       {
@@ -429,6 +595,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
         var outBytes = new byte[ids.Count * 4];
         for (int i = 0; i < ids.Count; i++)
           Array.Copy(BitConverter.GetBytes((uint)ids[i]), 0, outBytes, i * 4, 4);
+        if (!IsCurrent(context)) return false;
         File.WriteAllBytes(subFile, outBytes);
 
         Serilog.Log.Information("SMGo priority: elem {Id} → {Pct}% (slot {Idx}/{Total})",
@@ -442,8 +609,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
       }
     }
 
-    private bool ApplyOneEdit(JObject p)
+    private bool ApplyOneEdit(JObject p, CollectionContext? context = null)
     {
+      context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var parentId  = p["elementId"]?.Value<int>() ?? 0;
       var text      = p["text"]?.ToString() ?? "";
       var imageData = p["imageData"]?.ToString() ?? "";
@@ -458,6 +626,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, sb.ToString()))
         .WithParent(parentId).DoNotDisplay();
+      if (!IsCurrent(context)) return false;
       Svc.SM.Registry.Element.Add(out _, ElemCreationFlags.None, builder);
       return true;
     }
@@ -466,10 +635,11 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void StartFileWatchers()
     {
-      var gradesDir   = Path.Combine(DataDir, "grades");
-      var extractDir  = Path.Combine(DataDir, "extracts");
-      var itemsDir    = Path.Combine(DataDir, "items");
-      var dismissDir  = Path.Combine(DataDir, "dismisses");
+      if (!HasCollectionContext()) return;
+      var gradesDir   = QueueDir("grades");
+      var extractDir  = QueueDir("extracts");
+      var itemsDir    = QueueDir("items");
+      var dismissDir  = QueueDir("dismisses");
       Directory.CreateDirectory(gradesDir);
       Directory.CreateDirectory(extractDir);
       Directory.CreateDirectory(itemsDir);
@@ -524,7 +694,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ApplyPendingGrades()
     {
-      var dir = Path.Combine(DataDir, "grades");
+      var context = CaptureCollectionContext();
+      if (context == null) return;
+      var dir = QueueDir("grades", context);
       if (!Directory.Exists(dir)) return;
       foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
@@ -532,13 +704,21 @@ namespace SuperMemoAssistant.Plugins.SMGo
         {
           var reviews = JsonConvert.DeserializeObject<List<GradeRecord>>(File.ReadAllText(file));
           if (reviews == null || reviews.Count == 0) continue;
-          foreach (var r in reviews)
+          if (reviews.Exists(r => r.CollectionId != context.Id || r.ProtocolVersion != 2))
+          { Serilog.Log.Warning("SMGo left grade file {File}: collection or protocol mismatch", file); continue; }
+          while (reviews.Count > 0)
           {
+            var r = reviews[0];
             var p = new JObject { ["elementId"] = r.ElementId, ["grade"] = r.Grade };
-            ApplyOneGrade(p);
+            bool applied;
+            lock (_collectionGate)
+              applied = IsCurrent(context) && ApplyOneGrade(p, context);
+            if (!applied) break;
+            reviews.RemoveAt(0);
+            PersistRemaining(file, reviews);
             Thread.Sleep(200);
           }
-          MarkFileApplied(file);
+          if (reviews.Count > 0) Serilog.Log.Warning("SMGo left grade file {File}: not fully applied", file);
         }
         catch { }
       }
@@ -546,7 +726,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ApplyPendingExtracts()
     {
-      var dir = Path.Combine(DataDir, "extracts");
+      var context = CaptureCollectionContext();
+      if (context == null) return;
+      var dir = QueueDir("extracts", context);
       if (!Directory.Exists(dir)) return;
       foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
@@ -554,13 +736,21 @@ namespace SuperMemoAssistant.Plugins.SMGo
         {
           var extracts = JsonConvert.DeserializeObject<List<ExtractRecord>>(File.ReadAllText(file));
           if (extracts == null || extracts.Count == 0) continue;
-          foreach (var e in extracts)
+          if (extracts.Exists(e => e.CollectionId != context.Id || e.ProtocolVersion != 2))
+          { Serilog.Log.Warning("SMGo left extract file {File}: collection or protocol mismatch", file); continue; }
+          while (extracts.Count > 0)
           {
+            var e = extracts[0];
             var p = new JObject { ["text"] = e.Text, ["parentId"] = e.ParentId };
-            ApplyOneExtract(p);
+            bool applied;
+            lock (_collectionGate)
+              applied = IsCurrent(context) && ApplyOneExtract(p, context);
+            if (!applied) break;
+            extracts.RemoveAt(0);
+            PersistRemaining(file, extracts);
             Thread.Sleep(300);
           }
-          MarkFileApplied(file);
+          if (extracts.Count > 0) Serilog.Log.Warning("SMGo left extract file {File}: not fully applied", file);
         }
         catch { }
       }
@@ -568,7 +758,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ApplyPendingItems()
     {
-      var dir = Path.Combine(DataDir, "items");
+      var context = CaptureCollectionContext();
+      if (context == null) return;
+      var dir = QueueDir("items", context);
       if (!Directory.Exists(dir)) return;
       foreach (var file in Directory.GetFiles(dir, "*.json"))
       {
@@ -576,19 +768,30 @@ namespace SuperMemoAssistant.Plugins.SMGo
         {
           var items = JsonConvert.DeserializeObject<List<ItemRecord>>(File.ReadAllText(file));
           if (items == null || items.Count == 0) continue;
-          foreach (var item in items)
+          if (items.Exists(i => i.CollectionId != context.Id || i.ProtocolVersion != 2))
+          { Serilog.Log.Warning("SMGo left item file {File}: collection or protocol mismatch", file); continue; }
+          while (items.Count > 0)
           {
+            var item = items[0];
             var p = new JObject
             {
               ["type"] = item.Type, ["parentId"] = item.ParentId,
               ["question"] = item.Question, ["answer"] = item.Answer,
               ["sentence"] = item.Sentence,
             };
-            if (item.Type == "qa")    ApplyOneQA(p);
-            if (item.Type == "cloze") ApplyOneCloze(p);
+            bool applied;
+            lock (_collectionGate)
+            {
+              applied = IsCurrent(context) &&
+                (item.Type == "qa" ? ApplyOneQA(p, context) :
+                 item.Type == "cloze" && ApplyOneCloze(p, context));
+            }
+            if (!applied) break;
+            items.RemoveAt(0);
+            PersistRemaining(file, items);
             Thread.Sleep(300);
           }
-          MarkFileApplied(file);
+          if (items.Count > 0) Serilog.Log.Warning("SMGo left item file {File}: not fully applied", file);
         }
         catch { }
       }
@@ -598,7 +801,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ApplyPendingDismisses()
     {
-      var dismissDir = Path.Combine(DataDir, "dismisses");
+      var context = CaptureCollectionContext();
+      if (context == null) return;
+      var dismissDir = QueueDir("dismisses", context);
       if (!Directory.Exists(dismissDir)) return;
 
       foreach (var file in Directory.GetFiles(dismissDir, "*.json"))
@@ -607,18 +812,21 @@ namespace SuperMemoAssistant.Plugins.SMGo
         {
           var records = JsonConvert.DeserializeObject<List<DismissRecord>>(File.ReadAllText(file));
           if (records == null || records.Count == 0) continue;
-
-          foreach (var r in records)
+          if (records.Exists(r => r.CollectionId != context.Id || r.ProtocolVersion != 2))
+          { Serilog.Log.Warning("SMGo left dismiss file {File}: collection or protocol mismatch", file); continue; }
+          while (records.Count > 0)
           {
-            Svc.SM.UI.ElementWdw.GoToElement(r.ElementId);
-            Thread.Sleep(400);
-            Svc.SM.UI.ElementWdw.Done();
+            var r = records[0];
+            var p = new JObject { ["elementId"] = r.ElementId };
+            bool applied;
+            lock (_collectionGate)
+              applied = IsCurrent(context) && ApplyOneDismiss(p, context);
+            if (!applied) break;
+            records.RemoveAt(0);
+            PersistRemaining(file, records);
             Thread.Sleep(200);
           }
-
-          var dest = file.Replace(".json", ".applied.json");
-          if (File.Exists(dest)) File.Delete(dest);
-          File.Move(file, dest);
+          if (records.Count > 0) Serilog.Log.Warning("SMGo left dismiss file {File}: not fully applied", file);
         }
         catch { }
       }
@@ -629,6 +837,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var dest = file.Replace(".json", ".applied.json");
       if (File.Exists(dest)) File.Delete(dest);
       File.Move(file, dest);
+    }
+
+    private static void PersistRemaining<T>(string file, List<T> records)
+    {
+      if (records.Count == 0) MarkFileApplied(file);
+      else File.WriteAllText(file, JsonConvert.SerializeObject(records, Formatting.Indented));
     }
 
     // ── HTTP server ───────────────────────────────────────────────────────
@@ -781,6 +995,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ServeToday(HttpListenerResponse res)
     {
+      if (!HasCollectionContext()) { SendJson(res, new { error = "No active SuperMemo collection." }, 503); return; }
       var dataFile = Path.Combine(DataDir, "docs", "data", "today.json");
       if (!File.Exists(dataFile))
       {
@@ -788,6 +1003,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
         return;
       }
       var json = File.ReadAllText(dataFile);
+      var data = JObject.Parse(json);
+      if (!MatchesActiveCollection(data["collectionId"]?.ToString()))
+      {
+        SendJson(res, new { error = "today.json belongs to another collection. Export the active collection first." }, 409);
+        return;
+      }
       SendRaw(res, 200, "application/json", json);
     }
 
@@ -795,8 +1016,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var body    = ReadBody(req);
       var payload = JObject.Parse(body);
+      if (!TryCaptureIncomingCollection(payload, res, out var context) || context == null) return;
       var dateStr = payload["date"]?.ToString() ?? DateTime.Now.ToString("yyyy-MM-dd");
-      var dir     = Path.Combine(DataDir, "grades");
+      var dir     = QueueDir("grades", context);
       Directory.CreateDirectory(dir);
       var file = Path.Combine(dir, $"{dateStr}.json");
 
@@ -811,10 +1033,16 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var reviews = payload["reviews"] as JArray ?? new JArray();
       foreach (var r in reviews)
       {
+        if (r is not JObject review
+          || review["protocolVersion"]?.Value<int>() != 2
+          || !string.Equals(review["collectionId"]?.ToString(), context.Id, StringComparison.Ordinal))
+        { SendJson(res, new { error = "Grade record collection or protocol mismatch." }, 409); return; }
+        ((JObject)r)["collectionId"] = context.Id;
         var eid = r["elementId"]?.Value<int>() ?? 0;
         if (eid > 0) existing[eid] = (JObject)r;
       }
 
+      if (!IsCurrent(context)) { SendJson(res, new { error = "Active collection changed." }, 409); return; }
       File.WriteAllText(file, JsonConvert.SerializeObject(
         new JArray(existing.Values), Formatting.Indented));
 
@@ -825,8 +1053,10 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var body    = ReadBody(req);
       var extract = JObject.Parse(body);
+      if (!TryCaptureIncomingCollection(extract, res, out var context) || context == null) return;
       var date    = DateTime.Now.ToString("yyyy-MM-dd");
-      var dir     = Path.Combine(DataDir, "extracts");
+      var dir     = QueueDir("extracts", context);
+      extract["collectionId"] = context.Id;
       Directory.CreateDirectory(dir);
       var file = Path.Combine(dir, $"{date}.json");
 
@@ -838,6 +1068,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       foreach (var e in list) if (e["id"]?.ToString() == id) { found = true; break; }
       if (!found) list.Add(extract);
 
+      if (!IsCurrent(context)) { SendJson(res, new { error = "Active collection changed." }, 409); return; }
       File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
       SendJson(res, new { saved = list.Count });
     }
@@ -846,8 +1077,10 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var body = ReadBody(req);
       var item = JObject.Parse(body);
+      if (!TryCaptureIncomingCollection(item, res, out var context) || context == null) return;
       var date = DateTime.Now.ToString("yyyy-MM-dd");
-      var dir  = Path.Combine(DataDir, "items");
+      var dir  = QueueDir("items", context);
+      item["collectionId"] = context.Id;
       Directory.CreateDirectory(dir);
       var file = Path.Combine(dir, $"{date}.json");
 
@@ -859,6 +1092,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       foreach (var e in list) if (e["id"]?.ToString() == id) { found = true; break; }
       if (!found) list.Add(item);
 
+      if (!IsCurrent(context)) { SendJson(res, new { error = "Active collection changed." }, 409); return; }
       File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
       SendJson(res, new { saved = list.Count });
     }
@@ -867,8 +1101,10 @@ namespace SuperMemoAssistant.Plugins.SMGo
     {
       var body   = ReadBody(req);
       var record = JObject.Parse(body);
+      if (!TryCaptureIncomingCollection(record, res, out var context) || context == null) return;
       var date   = DateTime.Now.ToString("yyyy-MM-dd");
-      var dir    = Path.Combine(DataDir, "dismisses");
+      var dir    = QueueDir("dismisses", context);
+      record["collectionId"] = context.Id;
       Directory.CreateDirectory(dir);
       var file = Path.Combine(dir, $"{date}.json");
 
@@ -876,13 +1112,14 @@ namespace SuperMemoAssistant.Plugins.SMGo
       if (File.Exists(file)) list = JArray.Parse(File.ReadAllText(file));
       list.Add(record);
 
+      if (!IsCurrent(context)) { SendJson(res, new { error = "Active collection changed." }, 409); return; }
       File.WriteAllText(file, JsonConvert.SerializeObject(list, Formatting.Indented));
       SendJson(res, new { saved = list.Count });
     }
 
     private void ServeExtracts(HttpListenerResponse res)
     {
-      var dir  = Path.Combine(DataDir, "extracts");
+      var dir  = QueueDir("extracts");
       var all  = new JArray();
       if (Directory.Exists(dir))
         foreach (var f in Directory.GetFiles(dir, "*.json"))
@@ -892,7 +1129,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     private void ServePendingGrades(HttpListenerResponse res)
     {
-      var dir    = Path.Combine(DataDir, "grades");
+      var dir    = QueueDir("grades");
       var result = new JArray();
       if (Directory.Exists(dir))
         foreach (var f in Directory.GetFiles(dir, "*.json"))
@@ -911,12 +1148,11 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
     // ── PDF serving (LAN fallback) ────────────────────────────────────────
 
-    private const string CollectionElemDir = @"C:\SuperMemo\systems\Facharzt\elements";
-    private const string CollectionInfoDir = @"C:\SuperMemo\systems\Facharzt\info";
-
+    private string CollectionElemDir => Path.Combine(
+      CaptureCollectionContext()?.Root ?? throw new InvalidOperationException("No active collection"), "elements");
     // Find the parent .pdf file for a pdf-extract element.
     // SM creates the parent PDF element first (ID=N), then children (N+1, N+2...) in the same dir bucket.
-    private static string? FindParentPdfPath(int extractId)
+    private string? FindParentPdfPath(int extractId)
     {
       int dir = (extractId - 1) / 10;
       for (int candidate = extractId - 1; candidate >= 1; candidate--)
@@ -1029,6 +1265,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
   internal class GradeRecord
   {
+    [JsonProperty("protocolVersion")] public int ProtocolVersion { get; set; }
+    [JsonProperty("collectionId")] public string CollectionId { get; set; } = "";
     [JsonProperty("elementId")] public int    ElementId { get; set; }
     [JsonProperty("grade")]     public int    Grade     { get; set; }
     [JsonProperty("timestamp")] public string Timestamp { get; set; } = "";
@@ -1036,6 +1274,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
   internal class ExtractRecord
   {
+    [JsonProperty("protocolVersion")] public int ProtocolVersion { get; set; }
+    [JsonProperty("collectionId")] public string CollectionId { get; set; } = "";
     [JsonProperty("id")]          public string Id          { get; set; } = "";
     [JsonProperty("parentId")]    public int    ParentId    { get; set; }
     [JsonProperty("parentTitle")] public string ParentTitle { get; set; } = "";
@@ -1045,6 +1285,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
   internal class ItemRecord
   {
+    [JsonProperty("protocolVersion")] public int ProtocolVersion { get; set; }
+    [JsonProperty("collectionId")] public string CollectionId { get; set; } = "";
     [JsonProperty("id")]          public string Id          { get; set; } = "";
     [JsonProperty("type")]        public string Type        { get; set; } = ""; // "cloze" | "qa"
     [JsonProperty("parentId")]    public int    ParentId    { get; set; }
@@ -1057,6 +1299,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
   internal class DismissRecord
   {
+    [JsonProperty("protocolVersion")] public int ProtocolVersion { get; set; }
+    [JsonProperty("collectionId")] public string CollectionId { get; set; } = "";
     [JsonProperty("elementId")] public int    ElementId { get; set; }
     [JsonProperty("timestamp")] public string Timestamp { get; set; } = "";
   }

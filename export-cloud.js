@@ -4,7 +4,7 @@
 const fs   = require('fs');
 const path = require('path');
 const https = require('https');
-const { getTodayCards } = require('./sm-parser');
+const { getTodayCards, collection } = require('./sm-parser');
 
 let pdfjsLib;
 try {
@@ -28,7 +28,7 @@ const headers = {
   'Content-Type':  'application/json',
 };
 
-function supaRequest(reqPath, method, body, extraHeaders = {}) {
+function supaRequest(reqPath, method, body, extraHeaders = {}, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const url  = new URL(base + reqPath);
     const data = body ? JSON.stringify(body) : '';
@@ -43,6 +43,7 @@ function supaRequest(reqPath, method, body, extraHeaders = {}) {
       res.on('data', c => raw += c);
       res.on('end', () => resolve({ status: res.statusCode, body: raw }));
     });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`Supabase request timed out after ${timeoutMs}ms`)));
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
@@ -115,13 +116,21 @@ async function enrichPdfCards(cards) {
     return rest;
   });
 
-  const payload = { date, count: cleanCards.length, cards: cleanCards, generated: new Date().toISOString() };
+  const payload = {
+    protocolVersion: 2,
+    collectionId: collection.id,
+    collectionName: collection.name,
+    date,
+    count: cleanCards.length,
+    cards: cleanCards,
+    generated: new Date().toISOString(),
+  };
 
   const push = await supaRequest(
-    '/rest/v1/smgo_daily', 'POST',
-    { date, data: payload },
+    '/rest/v1/smgo_daily?on_conflict=collection_id,review_date', 'POST',
+    { collection_id: collection.id, review_date: date, date, data: payload },
     { 'Prefer': 'resolution=merge-duplicates' }
   );
   const pdfCount = cleanCards.filter(c => c.type === 'pdf-extract' && c.body).length;
-  console.log(`SMGo: pushed ${cleanCards.length} cards to Supabase (${pdfCount} PDF extracts with text) HTTP ${push.status}`);
+  console.log(`SMGo: pushed ${cleanCards.length} cards for ${collection.name} (${pdfCount} PDF extracts with text) HTTP ${push.status}`);
 })().catch(e => console.error('SMGo export-cloud error:', e.message));
