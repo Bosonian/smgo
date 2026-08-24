@@ -5,8 +5,16 @@ function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.textContent = t === 'light' ? '🌙' : '☀️';
+  if (btn) btn.setAttribute('aria-label', t === 'light' ? 'Use dark theme' : 'Use light theme');
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = t === 'light' ? '#f8fafc' : '#0f172a';
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
 }
 applyTheme(localStorage.getItem('smgo_theme') || 'dark');
 
@@ -33,19 +41,15 @@ async function supaUpsert(table, row) {
   const supa = getSupabase();
   if (!supa) return false;
   try {
-    const ac = new AbortController();
-    const t  = setTimeout(() => ac.abort(), 10_000);
-    const res = await fetch(`${supa.url}/rest/v1/${table}`, {
+    const res = await fetchWithTimeout(`${supa.url}/rest/v1/${table}`, {
       method: 'POST',
-      signal: ac.signal,
       headers: {
         apikey: supa.key, Authorization: `Bearer ${supa.key}`,
         'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates',
       },
       body: JSON.stringify(row),
-    });
-    clearTimeout(t);
+    }, 10_000);
     return res.ok;
   } catch { return false; }
 }
@@ -136,11 +140,12 @@ const extractCount   = $('extract-count');
 const extractDrawer  = $('extract-drawer');
 const extractList    = $('extract-list');
 const collectionSelector = $('collection-selector');
+const refreshBtn = $('refresh-btn');
 
 // ── Offline detection ──────────────────────────────────────────────────────
 window.addEventListener('online',  () => {
   offlineBanner.style.display = 'none';
-  if (!isStaticMode()) trySyncPending();
+  _pollTick();
 });
 window.addEventListener('offline', () => { offlineBanner.style.display = 'block'; });
 if (!navigator.onLine) offlineBanner.style.display = 'block';
@@ -174,9 +179,10 @@ async function initFromSupabase() {
   if (!supa) return false;
   try {
     const today = localDate();
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${supa.url}/rest/v1/smgo_daily?review_date=eq.${today}&select=collection_id,data&order=collection_id`,
-      { headers: { apikey: supa.key, Authorization: `Bearer ${supa.key}` } }
+      { headers: { apikey: supa.key, Authorization: `Bearer ${supa.key}` } },
+      12_000,
     );
     if (!res.ok) return false;
     const rows = await res.json();
@@ -196,9 +202,12 @@ async function initFromSupabase() {
     cards = selected.data.cards;
     idx   = 0;
     serverUrlWrap.textContent = `Supabase · ${cards.length} cards`;
-    loadStoredProgress();
-    showScreen('review');
-    renderCard();
+    if (!cards.length) showEmptyCollection(selected.data);
+    else {
+      loadStoredProgress();
+      showScreen('review');
+      renderCard();
+    }
     await syncAllPending();
     await syncAllExtracts();
     return true;
@@ -208,8 +217,11 @@ async function initFromSupabase() {
 function renderCollectionSelector(selectedId) {
   if (!collectionSelector) return;
   collectionSelector.replaceChildren();
-  if (availableCollections.length < 2) { collectionSelector.style.display = 'none'; return; }
-  for (const row of availableCollections) {
+  const rows = availableCollections.length ? availableCollections : (activeCollection ? [{
+    collection_id: activeCollection.id, data: { collectionName: activeCollection.name },
+  }] : []);
+  if (!rows.length) { collectionSelector.style.display = 'none'; return; }
+  for (const row of rows) {
     const option = document.createElement('option');
     option.value = row.collection_id;
     option.textContent = row.data?.collectionName || row.collection_id;
@@ -217,15 +229,26 @@ function renderCollectionSelector(selectedId) {
     collectionSelector.appendChild(option);
   }
   collectionSelector.style.display = '';
+  collectionSelector.disabled = rows.length < 2;
+}
+
+function showEmptyCollection(data = {}) {
+  const name = data.collectionName || activeCollection?.name || 'This collection';
+  $('done-icon').textContent = '✓';
+  $('done-title').textContent = `${name} is connected`;
+  $('done-restart-btn').style.display = 'none';
+  $('done-refresh-btn').style.display = '';
+  showScreen('done', 'No items are due today.', `Last export: ${data.generated ? new Date(data.generated).toLocaleString() : 'today'}`);
 }
 
 function activateAndLoadCards(data, fallbackId, source) {
   activateCollection(data, fallbackId);
+  renderCollectionSelector(activeCollection.id);
   loadExtracts();
   cards = data.cards || [];
   idx = 0;
   serverUrlWrap.textContent = `${source} · ${activeCollection.name} · ${cards.length} cards`;
-  if (!cards.length) { showScreen('done', 'No items due today!', ''); return; }
+  if (!cards.length) { showEmptyCollection(data); return; }
   loadStoredProgress();
   showScreen('review');
   renderCard();
@@ -241,7 +264,7 @@ collectionSelector?.addEventListener('change', () => {
 
 async function initStatic() {
   try {
-    const res  = await fetch('./data/today.json');
+    const res  = await fetchWithTimeout('./data/today.json', {}, 12_000);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     activateAndLoadCards(data, null, 'Static export');
@@ -258,14 +281,14 @@ async function initStatic() {
       }
     } catch {}
     $('error-msg').textContent = 'No exported data found.';
-    $('error-hint').textContent = 'Run export.bat on your desktop first, then push to GitHub.';
+    $('error-hint').textContent = 'Export the active SuperMemo collection, then refresh this page. You can also configure cloud sync in Settings.';
     showScreen('error');
   }
 }
 
 async function initServer() {
   try {
-    const res  = await fetch(`${getServerUrl()}/api/today`);
+    const res  = await fetchWithTimeout(`${getServerUrl()}/api/today`, {}, 12_000);
     const data = await res.json();
     activateAndLoadCards(data, null, 'Desktop server');
   } catch (err) {
@@ -349,6 +372,7 @@ function showScreen(name, msg = '', sub = '') {
 
   if (name === 'loading') { screenLoading.style.display = 'flex'; }
   else if (name === 'done') {
+    if (!$('done-title').textContent) $('done-title').textContent = 'Session complete!';
     $('done-msg').textContent = msg || `${grades.length} items reviewed.`;
     $('done-sub').textContent = sub;
     screenDone.style.display = 'flex';
@@ -357,6 +381,34 @@ function showScreen(name, msg = '', sub = '') {
   else if (name === 'review') {
     cardArea.style.display = 'flex';
     $('action-area').style.display = 'flex';
+  }
+}
+
+let modalReturnFocus = null;
+function openModal(id, focusId = null) {
+  modalReturnFocus = document.activeElement;
+  const modal = $(id);
+  modal.classList.add('open');
+  requestAnimationFrame(() => {
+    const target = focusId ? $(focusId) : modal.querySelector('button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
+    target?.focus();
+  });
+}
+function closeModal(id) {
+  $(id)?.classList.remove('open');
+  modalReturnFocus?.focus?.();
+  modalReturnFocus = null;
+}
+
+async function refreshQueue() {
+  if (refreshBtn?.disabled) return;
+  refreshBtn.disabled = true;
+  refreshBtn.classList.add('refreshing');
+  setSyncStatus('Refreshing queue…', '');
+  try { await init(); }
+  finally {
+    refreshBtn.disabled = false;
+    refreshBtn.classList.remove('refreshing');
   }
 }
 
@@ -496,7 +548,7 @@ function openPriorityModal() {
   document.querySelectorAll('.prio-preset').forEach(b => {
     b.classList.toggle('selected', parseInt(b.dataset.pct) === _pendingPriority);
   });
-  $('priority-modal').classList.add('open');
+  openModal('priority-modal', 'priority-slider');
 }
 
 async function applyPriority() {
@@ -505,7 +557,7 @@ async function applyPriority() {
   const originId = activeCollection?.id;
   if (!originId) return;
   const pct = _pendingPriority;
-  $('priority-modal').classList.remove('open');
+  closeModal('priority-modal');
   // Update local card data so badge refreshes immediately
   card.priority = pct;
   renderCard();
@@ -519,8 +571,8 @@ async function applyPriority() {
 
 (function wirePriorityModal() {
   $('priority-btn').addEventListener('click', openPriorityModal);
-  $('priority-modal-close').addEventListener('click', () => $('priority-modal').classList.remove('open'));
-  $('priority-cancel-btn').addEventListener('click', () => $('priority-modal').classList.remove('open'));
+  $('priority-modal-close').addEventListener('click', () => closeModal('priority-modal'));
+  $('priority-cancel-btn').addEventListener('click', () => closeModal('priority-modal'));
   $('priority-set-btn').addEventListener('click', applyPriority);
 
   const slider  = $('priority-slider');
@@ -616,6 +668,10 @@ function applyGrade(grade) {
 
 // ── Sync & Done ────────────────────────────────────────────────────────────
 async function syncAndDone() {
+  $('done-icon').textContent = '✅';
+  $('done-title').textContent = 'Session complete!';
+  $('done-restart-btn').style.display = '';
+  $('done-refresh-btn').style.display = '';
   // If no Supabase and no local server, grades are local-only
   if (isStaticMode() && !getSupabase()) {
     showScreen('done', `${grades.length} items reviewed.`, 'Configure Supabase in ⚙ to sync grades from anywhere.');
@@ -820,6 +876,10 @@ function updateExtractBadge() {
   extractBadgeBtn.style.display = n > 0 ? 'flex' : 'none';
 }
 
+function pendingActionCount() {
+  return [...pendingExtracts, ...pendingItems, ...pendingEdits].filter(x => !x.synced).length;
+}
+
 // Floating toolbar: appears above text selection inside card body
 let selTimer = null;
 function scheduleSelCheck(ms) {
@@ -942,7 +1002,7 @@ function captureForCloze() {
   sel.removeAllRanges();
   hideExtractToolbar();
   renderClozeEditor();
-  $('cloze-modal').classList.add('open');
+  openModal('cloze-modal');
 }
 
 function renderClozeEditor() {
@@ -977,7 +1037,7 @@ function saveCloze() {
   }, clozeCollectionId);
   pendingItems.push(item);
   saveItems();
-  $('cloze-modal').classList.remove('open');
+  closeModal('cloze-modal');
   showFlash('[ ] Cloze saved');
   if (!isStaticMode()) uploadItem(item);
 }
@@ -1009,7 +1069,7 @@ async function captureForQA() {
 
   $('qa-loading').style.display   = 'block';
   $('qa-form').style.display      = 'none';
-  $('qa-modal').classList.add('open');
+  openModal('qa-modal');
 
   try {
     const { question, answer } = await callGemini(text, apiKey);
@@ -1019,7 +1079,7 @@ async function captureForQA() {
     $('qa-loading').style.display = 'none';
     $('qa-form').style.display    = 'block';
   } catch (err) {
-    $('qa-modal').classList.remove('open');
+    closeModal('qa-modal');
     alert(`Gemini error: ${err.message}`);
   }
 }
@@ -1119,7 +1179,7 @@ function saveQA() {
   }, qaCollectionId);
   pendingItems.push(item);
   saveItems();
-  $('qa-modal').classList.remove('open');
+  closeModal('qa-modal');
   showFlash('🤖 Q&A saved');
   if (!isStaticMode()) uploadItem(item);
 }
@@ -1192,10 +1252,12 @@ function showExtractFlash(text) {
 
 // ── Pending items drawer ───────────────────────────────────────────────────
 function openExtractDrawer() {
+  modalReturnFocus = document.activeElement;
   renderExtractList();
   updateDrawerSyncTime();
   extractDrawer.classList.add('open');
   $('extract-drawer-backdrop').classList.add('open');
+  requestAnimationFrame(() => $('extract-drawer-close').focus());
 }
 
 function updateDrawerSyncTime() {
@@ -1217,34 +1279,42 @@ function updateDrawerSyncTime() {
 function closeExtractDrawer() {
   extractDrawer.classList.remove('open');
   $('extract-drawer-backdrop').classList.remove('open');
+  modalReturnFocus?.focus?.();
+  modalReturnFocus = null;
 }
 
 function renderExtractList() {
   const all = [
-    ...pendingExtracts.map(e => ({ ...e, _kind: e.type || 'extract' })),
-    ...pendingItems.map(i => ({ ...i, _kind: i.type })),
+    ...pendingExtracts.map((e, index) => ({ ...e, _kind: e.type || 'extract', _store: 'extracts', _index: index })),
+    ...pendingItems.map((i, index) => ({ ...i, _kind: i.type, _store: 'items', _index: index })),
+    ...pendingEdits.map((e, index) => ({ ...e, _kind: 'note', _store: 'edits', _index: index })),
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   if (all.length === 0) {
     extractList.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px;font-size:.85rem">No pending items</p>';
+    $('extract-clear-btn').disabled = true;
     return;
   }
 
-  const kindLabel = { extract: '✂ Extract', 'pdf-extract-create': '📄 PDF Extract', cloze: '[ ] Cloze', qa: '🤖 Q&A' };
+  const kindLabel = { extract: '✂ Extract', 'pdf-extract-create': '📄 PDF Extract', cloze: '[ ] Cloze', qa: '🤖 Q&A', note: '✏ Note' };
   extractList.innerHTML = all.map((item) => {
     let preview = '';
     if (item._kind === 'extract') preview = esc((item.text  || '').slice(0, 120));
     if (item._kind === 'cloze')   preview = esc((item.sentence || '').slice(0, 120));
     if (item._kind === 'qa')      preview = `Q: ${esc((item.question||'').slice(0,80))}`;
+    if (item._kind === 'note')    preview = esc((item.text || (item.imageData ? 'Image note' : 'Note')).slice(0,120));
     return `<div class="extract-item">
       <div class="extract-parent">
         <span class="kind-badge kind-${item._kind}">${kindLabel[item._kind] || item._kind}</span>
+        <span class="extract-status ${item.synced ? 'synced' : 'pending'}">${item.synced ? '✓ Synced' : 'Pending'}</span>
         #${item.parentId} · ${esc((item.parentTitle||'').slice(0,40))}
       </div>
       <div class="extract-text">${preview}</div>
-      <div class="extract-meta">${new Date(item.timestamp).toLocaleString()}${item.synced ? ' · ✓' : ''}</div>
+      <div class="extract-meta">${new Date(item.timestamp).toLocaleString()}</div>
+      <div class="extract-item-actions"><button class="extract-delete-btn" data-store="${item._store}" data-index="${item._index}" aria-label="Remove this saved action">✕</button></div>
     </div>`;
   }).join('');
+  $('extract-clear-btn').disabled = !all.some(item => item.synced);
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -1307,41 +1377,75 @@ function importLegacyFacharztState() {
   alert(`Imported ${copied.length} legacy state record(s). The old keys were left untouched.`);
 }
 
-$('settings-icon').addEventListener('click', () => {
-  const choice = prompt(
-    'Settings\n\n1) Server URL (local network)\n2) Gemini API key\n3) Supabase URL\n4) Supabase anon key\n5) Import old Facharzt browser state\n\nEnter number:',
-  );
-  if (choice === '1') {
-    const url = prompt('SMGo server URL (e.g. http://192.168.1.x:3001)', getServerUrl());
-    if (url !== null) {
-      if (url.trim()) localStorage.setItem('smgo_server', url.trim());
-      else localStorage.removeItem('smgo_server');
-      location.reload();
-    }
-  } else if (choice === '2') {
-    const key = prompt('Gemini API key (leave blank to clear):', localStorage.getItem('smgo_gemini_key') || '');
-    if (key !== null) {
-      if (key.trim()) localStorage.setItem('smgo_gemini_key', key.trim());
-      else localStorage.removeItem('smgo_gemini_key');
-    }
-  } else if (choice === '3') {
-    const url = prompt('Supabase project URL\n(e.g. https://abcxyz.supabase.co)', localStorage.getItem('smgo_supa_url') || '');
-    if (url !== null) {
-      if (url.trim()) localStorage.setItem('smgo_supa_url', url.trim());
-      else localStorage.removeItem('smgo_supa_url');
-    }
-  } else if (choice === '4') {
-    const key = prompt('Supabase anon key (from Project Settings → API):', localStorage.getItem('smgo_supa_key') || '');
-    if (key !== null) {
-      if (key.trim()) localStorage.setItem('smgo_supa_key', key.trim());
-      else localStorage.removeItem('smgo_supa_key');
-    }
-  } else if (choice === '5') {
-    importLegacyFacharztState();
+function setOptionalStorage(key, value) {
+  const clean = value.trim();
+  if (clean) localStorage.setItem(key, clean);
+  else localStorage.removeItem(key);
+}
+
+function openSettings() {
+  $('settings-supa-url').value = localStorage.getItem('smgo_supa_url') || '';
+  $('settings-supa-key').value = localStorage.getItem('smgo_supa_key') || '';
+  $('settings-server-url').value = localStorage.getItem('smgo_server') || '';
+  $('settings-gemini-key').value = localStorage.getItem('smgo_gemini_key') || '';
+  $('settings-connection-status').textContent = '';
+  $('settings-connection-status').className = '';
+  openModal('settings-modal', 'settings-supa-url');
+}
+
+function closeSettings() { closeModal('settings-modal'); }
+
+async function testSettingsConnection() {
+  const button = $('settings-test-btn');
+  const status = $('settings-connection-status');
+  const url = $('settings-supa-url').value.trim().replace(/\/$/, '');
+  const key = $('settings-supa-key').value.trim();
+  if (!url || !key) { status.textContent = 'Enter both the project URL and anon key.'; return; }
+  button.disabled = true;
+  status.textContent = 'Testing…';
+  try {
+    const res = await fetchWithTimeout(`${url}/rest/v1/smgo_daily?select=collection_id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    }, 10_000);
+    status.textContent = res.ok ? '✓ Connected to the collection-aware database.' : `Connection failed (HTTP ${res.status}).`;
+    status.className = res.ok ? 'sync-ok' : 'sync-fail';
+  } catch (err) {
+    status.textContent = err.name === 'AbortError' ? 'Connection timed out.' : 'Could not reach Supabase.';
+    status.className = 'sync-fail';
+  } finally { button.disabled = false; }
+}
+
+function saveSettings() {
+  const supaUrl = $('settings-supa-url').value.trim();
+  const serverUrl = $('settings-server-url').value.trim();
+  if (supaUrl && !/^https:\/\//i.test(supaUrl)) {
+    $('settings-connection-status').textContent = 'Supabase URL must start with https://';
+    $('settings-connection-status').className = 'sync-fail';
+    return;
   }
-});
+  if (serverUrl && !/^https?:\/\//i.test(serverUrl)) {
+    $('settings-connection-status').textContent = 'Desktop server URL must start with http:// or https://';
+    $('settings-connection-status').className = 'sync-fail';
+    return;
+  }
+  setOptionalStorage('smgo_supa_url', supaUrl);
+  setOptionalStorage('smgo_supa_key', $('settings-supa-key').value);
+  setOptionalStorage('smgo_server', serverUrl);
+  setOptionalStorage('smgo_gemini_key', $('settings-gemini-key').value);
+  closeSettings();
+  refreshQueue();
+}
+
+$('settings-icon').addEventListener('click', openSettings);
+$('settings-modal-close').addEventListener('click', closeSettings);
+$('settings-cancel-btn').addEventListener('click', closeSettings);
+$('settings-save-btn').addEventListener('click', saveSettings);
+$('settings-test-btn').addEventListener('click', testSettingsConnection);
+$('settings-import-legacy').addEventListener('click', importLegacyFacharztState);
 
 $('retry-btn').addEventListener('click', () => location.reload());
+$('refresh-btn').addEventListener('click', refreshQueue);
+$('done-refresh-btn').addEventListener('click', refreshQueue);
 $('done-restart-btn').addEventListener('click', () => {
   localStorage.removeItem(todayKey());
   location.reload();
@@ -1359,13 +1463,13 @@ $('dismiss-btn').addEventListener('click', () => {
 });
 
 // Cloze modal
-$('cloze-modal-close').addEventListener('click',  () => $('cloze-modal').classList.remove('open'));
-$('cloze-cancel-btn').addEventListener('click',   () => $('cloze-modal').classList.remove('open'));
+$('cloze-modal-close').addEventListener('click',  () => closeModal('cloze-modal'));
+$('cloze-cancel-btn').addEventListener('click',   () => closeModal('cloze-modal'));
 $('cloze-save-btn').addEventListener('click',     saveCloze);
 
 // Q&A modal
-$('qa-modal-close').addEventListener('click',  () => $('qa-modal').classList.remove('open'));
-$('qa-cancel-btn').addEventListener('click',   () => $('qa-modal').classList.remove('open'));
+$('qa-modal-close').addEventListener('click',  () => closeModal('qa-modal'));
+$('qa-cancel-btn').addEventListener('click',   () => closeModal('qa-modal'));
 $('qa-save-btn').addEventListener('click',     saveQA);
 
 // Drawer
@@ -1373,11 +1477,26 @@ extractBadgeBtn.addEventListener('click', openExtractDrawer);
 $('extract-drawer-close').addEventListener('click', closeExtractDrawer);
 $('extract-drawer-backdrop').addEventListener('click', closeExtractDrawer);
 $('extract-clear-btn').addEventListener('click', () => {
-  if (confirm('Clear all pending items?')) {
-    pendingExtracts = []; pendingItems = [];
-    saveExtracts(); saveItems();
-    renderExtractList();
-  }
+  const synced = [...pendingExtracts, ...pendingItems, ...pendingEdits].filter(x => x.synced).length;
+  if (!synced || !confirm(`Remove ${synced} synced action${synced === 1 ? '' : 's'} from this device?`)) return;
+  pendingExtracts = pendingExtracts.filter(x => !x.synced);
+  pendingItems = pendingItems.filter(x => !x.synced);
+  pendingEdits = pendingEdits.filter(x => !x.synced);
+  saveExtracts(); saveItems(); saveEdits();
+  renderExtractList();
+});
+$('extract-list').addEventListener('click', e => {
+  const button = e.target.closest('.extract-delete-btn');
+  if (!button) return;
+  const stores = { extracts: pendingExtracts, items: pendingItems, edits: pendingEdits };
+  const savers = { extracts: saveExtracts, items: saveItems, edits: saveEdits };
+  const records = stores[button.dataset.store];
+  const index = Number(button.dataset.index);
+  if (!records || !records[index]) return;
+  if (!records[index].synced && !confirm('Remove this unsynced action? It has not reached SuperMemo yet.')) return;
+  records.splice(index, 1);
+  savers[button.dataset.store]();
+  renderExtractList();
 });
 $('extract-sync-btn').addEventListener('click', async () => {
   const originId = activeCollection?.id;
@@ -1396,16 +1515,16 @@ $('extract-sync-btn').addEventListener('click', async () => {
   renderExtractList();
   updateExtractBadge();
 
-  const synced = pendingExtracts.filter(e => e.synced).length
-               + pendingItems.filter(i => i.synced).length;
-  const total  = pendingExtracts.length + pendingItems.length;
+  const synced = [...pendingExtracts, ...pendingItems, ...pendingEdits].filter(x => x.synced).length;
+  const total  = pendingExtracts.length + pendingItems.length + pendingEdits.length;
   const now    = new Date();
   const time   = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   localStorage.setItem(collectionStorageKey('last_sync', originId), now.toISOString());
   if (!isCurrentCollection(originId, originEpoch)) return;
   updateDrawerSyncTime();
-  showFlash(`✓ ${synced} of ${total} synced`);
-  setSyncStatus(`✓ Last sync: ${time}`, 'ok');
+  const pending = pendingActionCount();
+  showFlash(pending ? `${pending} action${pending === 1 ? '' : 's'} still pending` : `✓ ${synced} of ${total} synced`);
+  setSyncStatus(pending ? `${pending} saved action${pending === 1 ? '' : 's'} pending` : `✓ Last sync: ${time}`, pending ? 'fail' : 'ok');
 });
 
 // ── Edit / Add Note modal ─────────────────────────────────────────────────
@@ -1430,8 +1549,7 @@ function openEditModal() {
   $('edit-image-preview').style.display = 'none';
   $('edit-image-clear').style.display = 'none';
   $('edit-image-hint').style.display = '';
-  $('edit-modal').classList.add('open');
-  setTimeout(() => $('edit-note-text').focus(), 150);
+  openModal('edit-modal', 'edit-note-text');
 }
 
 async function saveEdit() {
@@ -1459,7 +1577,7 @@ async function saveEdit() {
   const originRecords = pendingEdits;
   saveEdits(originId, originRecords);
 
-  $('edit-modal').classList.remove('open');
+  closeModal('edit-modal');
 
   // Attempt immediate Supabase upload
   const supa = getSupabase();
@@ -1497,8 +1615,8 @@ document.addEventListener('paste', e => {
 });
 
 $('edit-btn').addEventListener('click', openEditModal);
-$('edit-modal-close').addEventListener('click',  () => $('edit-modal').classList.remove('open'));
-$('edit-cancel-btn').addEventListener('click',   () => $('edit-modal').classList.remove('open'));
+$('edit-modal-close').addEventListener('click',  () => closeModal('edit-modal'));
+$('edit-cancel-btn').addEventListener('click',   () => closeModal('edit-modal'));
 $('edit-save-btn').addEventListener('click',     saveEdit);
 $('edit-image-clear').addEventListener('click', () => {
   editImageData = null;
@@ -1560,6 +1678,7 @@ $('typo-toggle').addEventListener('click', () => {
   const panel = $('typo-panel');
   const open  = panel.classList.toggle('open');
   $('typo-toggle').classList.toggle('active', open);
+  $('typo-toggle').setAttribute('aria-expanded', String(open));
   if (open) syncTypoPanel();
 });
 
@@ -1577,10 +1696,18 @@ document.querySelectorAll('[data-typo]').forEach(group => {
 
 // ── Keyboard shortcuts (desktop / MacBook) ────────────────────────────────
 document.addEventListener('keydown', e => {
-  const anyModal = ['edit-modal','qa-modal','cloze-modal'].some(id => $(id)?.classList.contains('open'));
-  if (anyModal) {
+  const openModalEl = document.querySelector('.modal.open');
+  if (openModalEl) {
     if (e.key === 'Escape') {
-      ['edit-modal','qa-modal','cloze-modal'].forEach(id => $(id)?.classList.remove('open'));
+      e.preventDefault();
+      closeModal(openModalEl.id);
+    } else if (e.key === 'Tab') {
+      const focusable = [...openModalEl.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])')];
+      if (focusable.length) {
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
     }
     return;
   }

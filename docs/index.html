@@ -16,19 +16,20 @@
 <body>
 <div id="app">
 
-  <div id="offline-banner">Offline – using cached data</div>
+  <div id="offline-banner" role="status" aria-live="polite">Offline – changes stay safely on this device</div>
 
   <!-- Header -->
   <div id="header">
     <h1>SMGo</h1>
-    <select id="collection-selector" aria-label="Collection" style="display:none;max-width:140px"></select>
+    <select id="collection-selector" aria-label="Active collection"></select>
     <span id="progress-text">–</span>
-    <button id="extract-badge-btn" style="display:none" title="Pending extracts">
+    <button id="refresh-btn" class="icon-btn" title="Refresh today's queue" aria-label="Refresh today's queue">↻</button>
+    <button id="extract-badge-btn" style="display:none" title="Pending saved actions" aria-label="Open pending saved actions">
       ✂ <span id="extract-count">0</span>
     </button>
-    <button id="typo-toggle" title="Reading settings">Aa</button>
-    <button id="theme-toggle" title="Toggle theme">☀️</button>
-    <span id="settings-icon" title="Settings">⚙</span>
+    <button id="typo-toggle" title="Reading settings" aria-label="Reading settings" aria-expanded="false">Aa</button>
+    <button id="theme-toggle" title="Toggle theme" aria-label="Use light theme">☀️</button>
+    <button id="settings-icon" class="icon-btn" title="Settings" aria-label="Open settings">⚙</button>
   </div>
   <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
 
@@ -71,13 +72,13 @@
 
   <!-- Loading screen -->
   <div id="screen-loading">
-    <div class="spinner"></div>
+    <div class="spinner" aria-hidden="true"></div>
     <p style="color:var(--muted);font-size:.9rem">Loading today's items…</p>
     <div id="server-url-wrap"></div>
   </div>
 
   <!-- Error screen -->
-  <div id="screen-error" style="display:none">
+  <div id="screen-error" style="display:none" role="alert">
     <div style="font-size:2.5rem">⚠️</div>
     <p style="font-weight:600">Could not load items</p>
     <p id="error-msg" style="color:var(--muted);font-size:.85rem"></p>
@@ -87,11 +88,12 @@
 
   <!-- Done screen -->
   <div id="screen-done" style="display:none">
-    <div class="big-check">✅</div>
-    <p style="font-weight:600;font-size:1.1rem">Session complete!</p>
+    <div id="done-icon" class="big-check" aria-hidden="true">✅</div>
+    <p id="done-title" style="font-weight:600;font-size:1.1rem">Session complete!</p>
     <p id="done-msg" style="color:var(--muted);font-size:.9rem"></p>
     <p id="done-sub" style="color:var(--muted);font-size:.8rem;margin-top:4px"></p>
     <button id="done-restart-btn" style="margin-top:16px;padding:10px 24px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:10px;font-size:.9rem;cursor:pointer">Review again from start</button>
+    <button id="done-refresh-btn" class="primary-btn">Refresh queue</button>
   </div>
 
   <!-- Review card area (injected by app.js) -->
@@ -114,32 +116,32 @@
       <button id="priority-btn" class="secondary-btn" style="display:none" title="Set priority in SM">P: –</button>
       <button id="dismiss-btn" class="secondary-btn dismiss-btn" style="display:none">Dismiss</button>
     </div>
-    <div id="sync-status"></div>
+    <div id="sync-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- Extract drawer (slides up from bottom) -->
-  <div id="extract-drawer">
+  <div id="extract-drawer" role="dialog" aria-modal="true" aria-labelledby="extract-drawer-title">
     <div id="extract-drawer-header">
-      <span>Pending Extracts</span>
-      <button id="extract-drawer-close">✕</button>
+      <span id="extract-drawer-title">Saved actions</span>
+      <button id="extract-drawer-close" aria-label="Close saved actions">✕</button>
     </div>
     <div id="extract-list"></div>
     <div id="extract-drawer-footer">
       <div id="extract-last-sync"></div>
       <div style="display:flex;gap:8px">
-        <button id="extract-sync-btn">Sync to server</button>
-        <button id="extract-clear-btn">Clear all</button>
+        <button id="extract-sync-btn">Sync now</button>
+        <button id="extract-clear-btn">Remove synced</button>
       </div>
     </div>
   </div>
   <div id="extract-drawer-backdrop"></div>
 
   <!-- Cloze creation modal -->
-  <div id="cloze-modal" class="modal">
+  <div id="cloze-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cloze-modal-title">
     <div class="modal-content">
       <div class="modal-header">
-        <span>Create Cloze</span>
-        <button id="cloze-modal-close">✕</button>
+        <span id="cloze-modal-title">Create Cloze</span>
+        <button id="cloze-modal-close" aria-label="Close cloze editor">✕</button>
       </div>
       <p class="modal-hint">Tap words to blank them</p>
       <div id="cloze-word-editor"></div>
@@ -155,11 +157,11 @@
   </div>
 
   <!-- Q&A modal -->
-  <div id="qa-modal" class="modal">
+  <div id="qa-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="qa-modal-title">
     <div class="modal-content">
       <div class="modal-header">
-        <span>Generate Q&amp;A</span>
-        <button id="qa-modal-close">✕</button>
+        <span id="qa-modal-title">Generate Q&amp;A</span>
+        <button id="qa-modal-close" aria-label="Close Q and A editor">✕</button>
       </div>
       <div id="qa-loading" style="display:none">
         <div class="spinner" style="margin:24px auto"></div>
@@ -179,11 +181,11 @@
   </div>
 
   <!-- Priority modal -->
-  <div id="priority-modal" class="modal">
+  <div id="priority-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="priority-modal-title">
     <div class="modal-content">
       <div class="modal-header">
-        <span>Set Priority</span>
-        <button id="priority-modal-close">✕</button>
+        <span id="priority-modal-title">Set Priority</span>
+        <button id="priority-modal-close" aria-label="Close priority editor">✕</button>
       </div>
       <div class="priority-modal-body">
         <p class="priority-hint">Lower % = higher priority (SM shows it more often)</p>
@@ -208,11 +210,11 @@
   </div>
 
   <!-- Edit / Add note modal -->
-  <div id="edit-modal" class="modal">
+  <div id="edit-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
     <div class="modal-content">
       <div class="modal-header">
-        <span>✏ Add note to element</span>
-        <button id="edit-modal-close">✕</button>
+        <span id="edit-modal-title">✏ Add note to element</span>
+        <button id="edit-modal-close" aria-label="Close note editor">✕</button>
       </div>
       <div id="edit-form" style="padding:12px 18px;display:flex;flex-direction:column;gap:10px;flex:1;overflow-y:auto">
         <textarea id="edit-note-text" class="qa-textarea" rows="5" placeholder="Add a text note to this element…"></textarea>
@@ -225,6 +227,42 @@
       <div class="modal-footer">
         <button id="edit-cancel-btn" class="secondary-btn">Cancel</button>
         <button id="edit-save-btn" class="primary-btn">Save note</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-content settings-content">
+      <div class="modal-header">
+        <span id="settings-modal-title">Settings</span>
+        <button id="settings-modal-close" aria-label="Close settings">✕</button>
+      </div>
+      <div class="settings-body">
+        <section>
+          <h2>Cloud sync</h2>
+          <label for="settings-supa-url">Supabase project URL</label>
+          <input id="settings-supa-url" type="url" inputmode="url" autocomplete="url" placeholder="https://project.supabase.co">
+          <label for="settings-supa-key">Supabase anon key</label>
+          <input id="settings-supa-key" type="password" autocomplete="off" placeholder="Stored only on this device">
+          <div id="settings-connection-status" role="status" aria-live="polite"></div>
+          <button id="settings-test-btn" class="secondary-btn" type="button">Test connection</button>
+        </section>
+        <section>
+          <h2>Local network</h2>
+          <label for="settings-server-url">Desktop server URL</label>
+          <input id="settings-server-url" type="url" inputmode="url" placeholder="http://192.168.1.x:3001">
+        </section>
+        <section>
+          <h2>Q&amp;A generation</h2>
+          <label for="settings-gemini-key">Gemini API key</label>
+          <input id="settings-gemini-key" type="password" autocomplete="off" placeholder="Optional">
+        </section>
+        <button id="settings-import-legacy" class="secondary-btn" type="button">Import legacy Facharzt data</button>
+      </div>
+      <div class="modal-footer">
+        <button id="settings-cancel-btn" class="secondary-btn">Cancel</button>
+        <button id="settings-save-btn" class="primary-btn">Save settings</button>
       </div>
     </div>
   </div>

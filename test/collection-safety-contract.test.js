@@ -55,3 +55,18 @@ test('legacy highlight state is opt-in and one-time', () => {
   assert.match(source, /legacy highlight state exists/);
   assert.match(source, /__smgoLegacyImport/);
 });
+
+test('PWA polish keeps saved actions visible, refreshable, and fail-safe', () => {
+  const app = read('docs/app.js');
+  const html = read('docs/index.html');
+  const css = read('docs/style.css');
+  const sw = read('docs/sw.js');
+  assert.match(app, /fetchWithTimeout/);
+  assert.match(app, /pendingEdits\.map/);
+  assert.match(app, /Remove this unsynced action/);
+  assert.match(app, /showEmptyCollection/);
+  assert.match(html, /id="settings-modal"[^>]+role="dialog"/);
+  assert.match(html, /id="refresh-btn"/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(sw, /icons\/icon-180\.png/);
+});
