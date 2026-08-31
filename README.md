@@ -88,11 +88,13 @@ otherwise continue using the previous cached shell. The current shell cache is
 
 - Automatic grade application through SMA is not currently reliable because the
   running remoting service does not implement the advertised `AssignGrade`
-  method. Grade commands remain pending and do not block extracts, Q&A, cloze,
-  dismiss, or priority commands.
+  method or the complete repetition sequence. Grade commands remain pending and
+  do not block supported extracts, Q&A, cloze, or priority commands.
 - Automatic dismissal is also unavailable in this SMA/SM18 runtime. Dismiss
   commands remain pending; SMGo deliberately does not rewrite live SuperMemo
-  queue files or send unverified keystrokes.
+  queue files or drive unverified UI operations. Consequently, a card dismissed
+  in the PWA can reappear after export because it is still outstanding in SM;
+  dismissing it again records intent but does not make the dismissal durable.
 - An outstanding ID with no corresponding SuperMemo element file is omitted
   rather than exported as an empty card.
 - SuperMemo's `[...]` markers are incremental-reading extraction gaps already
@@ -103,3 +105,13 @@ question component. Do not infer question/answer relationships from adjacent
 element IDs. After a cloud mutation batch, the plugin performs one consolidated
 re-export so newly created Items and dismissals reach the PWA in the same
 SM/SMA session.
+
+## Stable runtime note (2026-09-01)
+
+An experimental SMA-core compatibility bridge was compiled and tested only
+against the disposable `C:\SuperMemo\systems\SMGoBridgeTest` clone. The test
+was stopped after duplicate SM processes caused repeating statistics and
+collection-open dialogs. It was completely rolled back: the original SMA core
+and the fail-closed SMGo plugin are installed, and no experimental bridge code
+is committed. Do not open that disposable clone. The Endgame collection was not
+used or modified by the experiment.

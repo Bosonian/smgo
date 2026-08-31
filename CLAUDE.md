@@ -56,7 +56,7 @@ C:\SuperMemo\SMGo\
 ├── sm-parser.js             ← reads SM Outstanding.sub + element HTML → card objects
 │                               also: getPriorityMap(), Q&A pair detection/merging
 ├── server.js                ← limited legacy LAN server (grades/extracts + card serving only)
-├── export.js                ← manual: generates today.json + git push
+├── export.js                ← manual: generates today.json only; publishing is explicit
 ├── export-cloud.js          ← auto: pushes today's cards to Supabase (run by plugin on startup)
 ├── highlight-extract.js     ← scans SM element PDFs for annotations → pushes to Supabase
 │                               run automatically every 5 min by Task Scheduler
@@ -108,8 +108,8 @@ C:\SuperMemo\SMGo\
 - Extract → `ElementType.Topic` with `TextContent`, `.WithParent(parentId)`, `.DoNotDisplay()`
 - Q&A → `ElementType.Item` with two `TextContent` args (question, answer)
 - Cloze → `ElementType.Item`, regex `[word]` → `<span style="color:blue">[...]</span>`
-- Grade → `GoToElement(id)` + sleep 400ms + `AssignGrade(grade)` + sleep 200ms
-- Dismiss → `Svc.SM.Registry.Element[id].Done()` — calls SM engine directly (no UI dialog), marks as Dismissed permanently
+- Grade → guarded attempt only. The installed SMA core does not implement the newer remoting methods needed for a verified repetition, so unsupported commands remain pending.
+- Dismiss → guarded attempt only. `Registry.Element[id].Done()` throws `NotImplementedException` in the installed SMA core; unsupported commands remain pending and no live queue file is rewritten.
 - Priority → reads/writes `info/priority.sub` directly (flat uint32 array, position = rank)
 - `ElementBuilder(ElementType, params ContentBase[])` — no `.WithContent()` method, pass contents in constructor
 - **pdf-extract-create** → creates SM element from `payload.segments[]`; each segment is `{kind:'text', text}` or `{kind:'image', dataUrl?}` or `{kind:'image', imgPath?}`; `imgPath` is rendered as `<img src="file:///...">` with backslashes converted to forward slashes
@@ -118,12 +118,12 @@ C:\SuperMemo\SMGo\
 ### Supabase queue types handled by plugin
 | type | payload fields | effect |
 |------|---------------|--------|
-| `grade` | `elementId`, `grade` | GoToElement + AssignGrade |
+| `grade` | `elementId`, `grade` | guarded attempt; remains pending when the SMA bridge rejects it |
 | `extract` | `parentId`, `text` | create child Topic element |
 | `pdf-extract-create` | `parentId`, `segments[]` | create child Topic with multiple paragraphs |
 | `cloze` | `parentId`, `sentence`, `answer` | create Item with cloze blank |
 | `qa` | `parentId`, `question`, `answer` | create Item |
-| `dismiss` | `elementId` | element.Done() — permanent removal from Outstanding |
+| `dismiss` | `elementId` | guarded attempt; remains pending when `element.Done()` is unavailable |
 | `priority` | `elementId`, `priority` (0–100%) | reposition in priority.sub |
 
 ---
@@ -323,7 +323,7 @@ git push
 
 16. **`config.json` must be gitignored** — Contains Supabase credentials. Add to `.gitignore` before first commit or credentials end up in public repo history.
 
-17. **`IElementWdw.Done()` shows a confirmation dialog** — `Svc.SM.UI.ElementWdw.Done()` triggers SM's UI dismiss dialog. Use `Svc.SM.Registry.Element[id].Done()` instead — calls the engine directly, no dialog, marks element as Dismissed immediately.
+17. **Neither exposed dismissal path is production-safe in the installed runtime** — `Svc.SM.UI.ElementWdw.Done()` invokes SuperMemo's interactive Done operation and may display confirmation/statistics dialogs. `Svc.SM.Registry.Element[id].Done()` throws `NotImplementedException` in the installed SMA core. Keep dismiss commands pending; do not automate either path or edit live queue files.
 
 18. **`SetElementState` is not for learning state** — Despite the name, `IElementWdw.SetElementState` controls the *display* mode of the element window (e.g. question/answer view), not the learning state (Memorized/Dismissed). Cannot be used to dismiss elements.
 
@@ -367,7 +367,7 @@ git push
 
 38. **Saved-action UI must include every persisted queue type (2026-08-24)** — The header badge counts extracts, cloze/Q&A items, and edits/notes, so the drawer, sync totals, and cleanup logic must use those same three stores. Never offer a blanket clear operation that silently deletes unsynced work. The PWA now labels each record Pending/Synced, confirms individual deletion of unsynced records, and only bulk-removes synced records.
 
-39. **PWA network and dialog reliability (2026-08-24)** — Initial Supabase, static JSON, and LAN loads use `fetchWithTimeout()` so a dead endpoint cannot leave an infinite spinner. The Settings UI is a real dialog with validation and a Supabase schema connection test; do not revert it to numbered `prompt()` calls. All dialogs, including priority and settings, participate in Escape handling, focus containment, and focus restoration. Service-worker shell version for this release is `smgo-v50`, including the 180px Apple touch icon.
+39. **PWA network and dialog reliability (2026-08-24)** — Initial Supabase, static JSON, and LAN loads use `fetchWithTimeout()` so a dead endpoint cannot leave an infinite spinner. The Settings UI is a real dialog with validation and a Supabase schema connection test; do not revert it to numbered `prompt()` calls. All dialogs, including priority and settings, participate in Escape handling, focus containment, and focus restoration. Service-worker shell version is currently `smgo-v51`, including the 180px Apple touch icon.
 
 40. **Neuro100x integration was evaluated and deliberately rejected (2026-08-24)** — Keep SMGo and Neuro100x Personal SRS as separate PWAs, origins, credentials, service workers, offline queues, grading interfaces, and scheduling authorities. SMGo remains the SuperMemo 18 companion; Neuro100x remains an authenticated projection of its Mac-authoritative append-only FSRS journal. Do not map SM grades to FSRS ratings, intermingle review queues, copy cards automatically, or place Neuro100x authentication in the SMGo origin. Acceptable future integration is limited to consistent visual conventions and explicit reciprocal launch links that exchange no credentials, card content, or review state.
 
@@ -387,14 +387,24 @@ git push
 
 48. **Unsupported mutations fail closed (2026-08-31)** — Do not use `SendKeys` as an automatic grade fallback and do not rewrite `Outstanding.sub`/`priority.sub` while SuperMemo is running as a dismiss fallback. Those commands stay pending until a collection-checked, verifiable mechanism exists. The manual exporter generates data only; publishing is an explicit Git operation.
 
-## Endgame operational status (2026-08-31)
+49. **SMA bridge version gap confirmed (2026-09-01)** — The installed SMA application is `2.1.0-beta.21`, SMGo references Interop `2.1.0-beta.26`, and the last official SMA core source targets Interop `2.1.0-beta.18`. Interop later advertised `AssignGrade`, `ExecuteRepetition`, `BeginLearning`, and `Exit`, but the official core never implemented those methods. Interface presence is not proof of runtime support.
+
+50. **A verified grade is a two-stage native operation (2026-09-01)** — Investigation indicates that a correct SM18 repetition requires writing and verifying `TElWind.RecentGrade` as a signed byte in the range 0–5, then invoking `TElWind.ExecuteUncommittedRepetition`. Calling `AssignGrade` alone is insufficient. A temporary compatibility core implementing this sequence compiled cleanly, but it was experimental and was not retained or deployed.
+
+51. **Aborted bridge test and complete rollback (2026-09-01)** — Runtime testing used the disposable clone `C:\SuperMemo\systems\SMGoBridgeTest`, never Endgame. Two SM processes inadvertently opened that clone and produced repeating old-statistics/access-denied dialogs, so SM and SMA were force-closed. The original SMA core was restored (`D72B53BF472BBE99B5C64F82587AA2FEF2981FC9116BB474CB9D2C87721075FE`) and the stable fail-closed SMGo plugin was rebuilt and installed (`0662BE8F3A586FD93F723EDA18F9033425F65F844E07B49B220FDFFC0D386237`). No experimental bridge code is installed or committed. Do not open the disposable clone; remove it only with explicit approval.
+
+52. **Repeated PWA dismissal is expected while dismissal is unsupported (2026-09-01)** — Cards dismissed in the PWA can reappear after the next export because the corresponding SuperMemo elements remain outstanding. Dismissing them again records another client intent but does not make the SuperMemo dismissal durable. Treat repeated dismiss rows as unresolved commands, not new cards and not proof of corruption. Do not keep retrying automatically or mark them applied until a verified bridge exists.
+
+53. **Current stable boundary after rollback (2026-09-01)** — Repository behavior remains the hardened fail-closed design at/after `d845c8e`: export, rendering, Q&A/cloze/extract creation, explicit metadata, idempotency, collection isolation, and priority handling remain supported; automatic grade and dismiss remain pending. The regression suite has 18 passing tests and the Release plugin builds with zero warnings/errors.
+
+## Endgame operational status (2026-09-01)
 
 - Active collection ID: `collection-endgame-1d821730858a`.
-- The 2026-08-31 hardened Release plugin is installed in SMA's package store and hash-matched to the build output (`25BF564F…DC65`). It becomes active on the next SM/SMA launch.
-- Pending cloud batch inspected before launch: five Q&A commands with five matching dismissals, plus one unrelated grade for element 15.
-- Create commands are processed before dismissals so dependent Q&A/cloze children exist first. Unsupported dismissals remain pending instead of editing live collection files.
-- After opening SMA and Endgame, allow 30–60 seconds for the first poll and same-session re-export before refreshing the PWA.
-- Regression suite after this session: 18 tests passing; plugin compiles with zero C# warnings before deployment copy.
+- The stable Release plugin is installed in SMA's package store and hash-matched to the build output (`0662BE8F…6237`). The original SMA core is restored (`D72B53BF…75FE`); no experimental bridge is active.
+- The Q&A creation commands were previously processed. Known unresolved mutations included dismissals and one grade for element 15; the user dismissed redisplayed cards again on 2026-09-01, so exact pending-row counts must be queried from Supabase before any future remediation.
+- Creates are processed before dismissals. Unsupported dismissals and grades remain pending instead of editing live collection files or driving unverified UI actions.
+- After opening SMA and Endgame, allow 30–60 seconds for the first poll and same-session re-export before refreshing the PWA. Redisplayed dismissed cards currently indicate the known unsupported dismissal path.
+- Regression suite after this session: 18 tests passing; plugin compiles with zero C# warnings/errors and the installed DLL hash matches the build.
 
 ## Current local collection onboarding (2026-08-24)
 
