@@ -1,195 +1,228 @@
 {
-  "date": "2026-05-18",
-  "count": 30,
+  "protocolVersion": 2,
+  "collectionId": "collection-endgame-1d821730858a",
+  "collectionName": "Endgame",
+  "date": "2026-08-31",
+  "count": 31,
   "cards": [
     {
-      "id": 12,
-      "type": "pdf-extract",
-      "title": "030-071_Neuroborreliose_2024-05.pdf",
-      "body": "030-071_Neuroborreliose_2024-05.pdf\nPage 0\nPDF: 030-071_Neuroborreliose_2024-05.pdf",
-      "pdfPage": 0
-    },
-    {
-      "id": 6,
-      "type": "pdf-extract",
-      "title": "Thieme: Neurologie compact",
-      "body": "Thieme: Neurologie compact\nPage 859\nPDF: -_Neurologie-compact_9783132430365.pdf",
-      "pdfPage": 859
-    },
-    {
-      "id": 30,
+      "id": 16,
       "type": "topic",
-      "title": "The differential amplifier takes the electrical impulses from the active electro",
-      "body": "The differential amplifier takes the electrical impulses from the active electrode and amplifies\r\n\nthem. It then takes the impulses from the reference electrode, inverts them, and amplifies them.\r\n\nIt then combines these two potentials. In this way, any common noise to both electrodes (extra-\r\n\nneous electrical activity, distant myogenic noise, and EKG artifacts) is eliminated. Differences\r\n\nbetween the two electrodes, however, are amplified. This is the desired signal. Any common\r\n\nfactors such as extraneous noise would be rejected leading to the term common mode rejection.\r\n\nThe common mode rejection ratio is a measure of how well an amplifier eliminates this type of\r\n\ncommon noise."
+      "title": "▪Testung neuropsychologischer Phänomene: Der",
+      "body": "▪Testung neuropsychologischer Phänomene: Der \n\nPatient soll …\n\n▪Gegenstände benennen (z.B. Brille, Buch): \n\nBenennungsstörung?\n\n▪einfache Sätze nachsprechen (z.B.: „Heute ist \n\nschönes Wetter“): Aphasie? Dysarthrie?\n\n▪vorlesen und schreiben: Aphasie? Alexie? \n\nAgrafie?\n\n▪bekannte Personen (z.B. Enkelkinder) auf \n\nBildern erkennen: Prosopagnosie?\n\n▪einfache Handlungen durchführen (z.B. Haare \n\nkämmen lassen): Apraxie?\n\n▪Uhr mit Ziffern und Uhrzeit zeichnen: räumlich-\n\nkonstruktive Störung?\n\n▪Bedeutung von Sprichwörtern erklären: Störung \n\nvon Denk- und Urteilsfähigkeit?\n\n▪Unterschiede zwischen 2 Begriffen erklären \n\n(z.B. zwischen Kanal und Fluss): Störung von \n\nDenk- und Urteilsfähigkeit?",
+      "priority": 0
     },
     {
-      "id": 46,
+      "id": 15,
       "type": "topic",
-      "title": "A demyelinated axon is a myelinated nerve that has lost its myelin covering.This",
-      "body": "A demyelinated axon is a myelinated nerve that has lost its myelin covering.This does not become\r\n\nan unmyelinated nerve. While an unmyelinated axon can conduct an impulse slowly along its\r\n\nentire length, a demyelinated axon may not be able to conduct across a demyelinated area (as the\r\n\nsodium and potassium channels are only located near the nodes of Ranvier). This loss of conduc-\r\n\ntion across a lesion is referred to as conduction block. The term neurapraxia is used to describe\r\n\na lesion where conduction block is present.\r\n\nIt is important to note that while axons have an 'all or none' response, an action potential\r\n\nrepresents the summation of many axons. Thus, a neurapraxic lesion can result in an amplitude\r\n\ndecrement from less than 1% to nearly 100%. In reality, neurapraxic lesions of less than 20% are\r\n\nrarely diagnosed due to the amplitude differences normally seen from different sites of\r\n\nstimulation.\r\n\nAfter a demyelinating lesion, as part of the recovery phase, there is typically regeneration of\r\n\nimmature myelin. This immature myelin will not insulate as well as mature myelin, and therefore\r\n\nduring NCS you may see a return of conduction but at a slower than normal velocity. Therefore,\r\n\nconduction slowing and conduction block are indicative of demyelinating, but not axonal lesions"
-    },
-    {
-      "id": 29,
-      "type": "topic",
-      "title": "NCS",
-      "body": "NCS\r\n\nActive (surface electrode – this is also referred to as the pickup electrode)\r\n\nReference (surface electrode)\r\n\nGround (surface electrode)"
-    },
-    {
-      "id": 28,
-      "type": "topic",
-      "title": "EMG",
-      "body": "EMG\r\n\nActive (needle electrode)\r\n\nReference (surface electrode)*\r\n\nGround (surface electrode)"
-    },
-    {
-      "id": 25,
-      "type": "topic",
-      "title": "F-wave – a compound muscle action potential evoked by antidromically stimulating",
-      "body": "F-wave – a compound muscle action potential evoked by antidromically stimulating a motor nerve\r\n\nfrom a muscle using maximal electrical stimulus. It represents the time required for a stimulus to\r\n\ntravel antidromically toward the spinal cord and to return orthodromically to the muscle along a very\r\n\nsmall percentage of the fibers."
-    },
-    {
-      "id": 34,
-      "type": "topic",
-      "title": "Initial Sensory NCS Settings",
-      "body": "Initial Sensory NCS Settings\r\n\nSweep speed 1–2 msec/division – generally 10 divisions are present in a horizontal screen.\r\n\nSensitivity (gain) 20 µV/division\r\n\nLow-frequency filter 2–10 Hz\r\n\nHigh-frequency filter 2 kHz"
+      "title": "Despite gradual declines in overall stroke death rates in many industrialized co",
+      "body": "Despite gradual declines in overall stroke death rates in many industrialized countries, stroke remains a leading cause of death and disability worldwide.",
+      "priority": 2
     },
     {
       "id": 33,
       "type": "topic",
-      "title": "SWEEP SPEED AND SENSITIVITY",
-      "body": "SWEEP SPEED AND SENSITIVITY\r\n\nBoth the sweep speed and sensitivity can affect your NCS results. As the sensitivity is increased,\r\n\nthe onset latency will decrease. So, it is important to record all of your latency measurements\r\n\nusing the same sensitivity and sweep speed."
+      "title": "MRT mit venöser Magnetresonanzangiografie",
+      "body": "MRT mit venöser Magnetresonanzangiografie\n\n(vMRA) → bessere Darstellung eines throm-\n\nbosierten Sinus oder einer thrombosierten \n\n(größeren) Hirnvene (s.a. Kommentar)\n\n▪alternativ CT mit Angio-CT (CTA) mit Dar-\n\nstellung der Venen → Darstellung des throm-\n\nbosierten Sinus möglich, jedoch weniger sichere \n\nErfassung kleinerer Hirnvenenverschlüsse als in \n\nder vMRA, Strahlenbelastung (hier: Schwanger-\n\nschaft!)\n\n▪bei weiterhin unklarem Befund: invasive Angio-\n\ngrafie (heute nur selten notwendig)",
+      "priority": 32
     },
     {
-      "id": 39,
+      "id": 14,
       "type": "topic",
-      "title": "MEASUREMENTS",
-      "body": "MEASUREMENTS\r\n\nThe machine will do most of your calculations for you, but you still need to measure the distance\r\n\nbetween stimulations and between the stimulation and the recording electrode when you are\r\n\ndetermining the conduction velocity. It is imperative that the measurements are done accurately.\r\n\nOther than a simple oversight of not correctly recording the distance with your tape measure,\r\n\nmeasurement errors can occur across joints if the patient's limb is moved in different positions,\r\n\nwhich changes the distance you are measuring. This commonly occurs in ulnar nerve studies\r\n\nwhen the elbow is straight and then becomes flexed. Therefore, during an ulnar nerve study, it\r\n\nis best to keep the elbow flexed and in the same position for the duration of that particular study\r\n\n(and at the same angle on both sides). Skin measurements are major sources of error in electro-\r\n\ndiagnostic studies. This can be minimized by increasing the distance of the nerve segment being\r\n\nstudied (i.e., the shorter the distance, the greater the effect of a measurement error). In general,\r\n\nwhen measuring distance, follow the course of the nerve, rather than measuring the shortest\r\n\ndistance between the stimulating and recording electrodes.\r\n\nBesides a tape measure, another necessary measurement device in an electrodiagnostic lab is\r\n\na thermometer. This is generally an infrared thermometer or a contact thermometer on the skin,\r\n\nwhich records the skin temperature. Abnormally cold extremities can falsely increase latencies\r\n\nand alter (generally increase) amplitudes, particularly of sensory nerves."
-    },
-    {
-      "id": 41,
-      "type": "topic",
-      "title": "The nerve conduction studies most commonly performed are compound muscle action ",
-      "body": "The nerve conduction studies most commonly performed are compound muscle action poten-\r\n\ntials (CMAPs) for motor nerves, sensory nerve action potentials (SNAPs) for sensory nerves,\r\n\ncompound nerve action potentials (CNAPs) for mixed (sensory and motor) nerves, and late\r\n\nresponses (primarily F-waves and H-reflexes)."
-    },
-    {
-      "id": 42,
-      "type": "topic",
-      "title": "As a rule, a nerve conduction study is done only on myelinated nerve fibers beca",
-      "body": "As a rule, a nerve conduction study is done only on myelinated nerve fibers because unmy-\r\n\nelinated fibers conduct extremely slowly and do not contribute significantly to the CMAPs and\r\n\n[...] SNAPs. A myelinated nerve fiber is composed of an axon and its surrounding myelin sheath\r\n\n(Fig. 4.3). Myelin is a connective covering surrounding motor nerve axons and many sensory\r\n\nnerve axons. Myelin is produced by Schwann cells and functions to greatly increase the speed of\r\n\nnerve conduction. Myelin acts as an excellent insulator and permits saltatory conduction. This\r\n\noccurs when depolarization takes place only at the nodes between the myelin sheaths (referred\r\n\nto as nodes of Ranvier). For this reason, myelinated axons have their voltage-dependent sodium\r\n\nchannels concentrated around the nodes, with few in the internodal regions. This type of\r\n\njumping (or saltatory) conduction, where time is not required to depolarize axons between the\r\n\nnodes, permits a greater than tenfold increase in velocity."
-    },
-    {
-      "id": 26,
-      "type": "topic",
-      "title": "Latency – the time interval between the onset of a stimulus and the onset of a r",
-      "body": "Latency – the time interval between the onset of a stimulus and the onset of a response (can also be\r\n\nreferred to as a motor latency or a sensory latency)."
-    },
-    {
-      "id": 20,
-      "type": "pdf-extract",
-      "title": "030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf",
-      "body": "030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf\nPage 0\nPDF: 030-046_Akuttherapie_Schlaganfall_Langfassung_2021.pdf",
-      "pdfPage": 0
-    },
-    {
-      "id": 27,
-      "type": "topic",
-      "title": "H-reflex – a compound muscle action potential evoked by orthodromically stimulat",
-      "body": "H-reflex – a compound muscle action potential evoked by orthodromically stimulating sensory fibers,\r\n\nsynapsing at the spinal level and returning orthodromically via motor fibers. The response is thought\r\n\nto be due to a monosynaptic spinal reflex (Hoffmann reflex) found in normal adults in the\r\n\ngastrocnemius–soleus and flexor carpi radialis muscles"
-    },
-    {
-      "id": 10,
-      "type": "pdf-extract",
-      "title": "030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf",
-      "body": "030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf\nPage 0\nPDF: 030-133_Sekundaerprophylaxe_Teil1_PFO_Addendum_2025-02.pdf",
-      "pdfPage": 0
-    },
-    {
-      "id": 49,
-      "type": "topic",
-      "title": "Latency",
-      "body": "Latency\r\n\nThe latency represents the time it takes from stimulation of the nerve to the beginning of the\r\n\nSNAP or the CMAP. In a CMAP, the onset latency represents the arrival time (at the recording\r\n\nelectrode over the muscle) of the fastest-conducting nerve fibers. There is normal variation in\r\n\n[...] the conduction velocity of the individual nerve fibers producing a temporally dispersed curve.\r\n\nThis is usually a gaussian or bell-shaped curve representing the number of fibers (amplitude) and\r\n\nhow fast they are traveling (latency)."
-    },
-    {
-      "id": 45,
-      "type": "topic",
-      "title": "The Action Potential",
-      "body": "The Action Potential\r\n\nThe action potential is a summation of many potentials. In a CMAP, it is the summation of\r\n\nmotor units (muscle fibers) that are firing, while a SNAP is a summation of individual sensory\r\n\nnerve fibers, each with its own amplitude and slightly different conduction velocity. This sum-\r\n\nmation yields a characteristic (usually bell-shaped) curve. The part of the curve that begins to rise\r\n\nfirst represents components from the fastest fibers.The typical action potential is shown on a time\r\n\nversus amplitude chart (Fig. 4.4). The amplitude can be measured from onset to peak (A–B) or\r\n\nfrom peak to trough (B–C). The duration is the time from the onset to recovery (A–D). The area\r\n\nunder the curve is a function of the amplitude and the duration. Instead of relying solely on\r\n\namplitude, some electromyographers consider the area under the curve (measurement of the total\r\n\narea from negative departure from baseline to return to baseline) as a more accurate estimate of\r\n\nthe number of axons firing. (Although this may seem a bit counterintuitive, it's important to\r\n\nremember that in electrodiagnostic terminology, negative refers to an upward deflection from\r\n\nbaseline and 'positive' refers to a downward deflection from baseline.)"
+      "title": "8%–12% of ischemic strokes result in death within 30 days.",
+      "body": "8%–12% of ischemic strokes result in death within 30 days.",
+      "priority": 5
     },
     {
       "id": 18,
-      "type": "pdf-extract",
-      "title": "030-079_Status_epilepticus_2025-07.pdf",
-      "body": "030-079_Status_epilepticus_2025-07.pdf\nPage 0\nPDF: 030-079_Status_epilepticus_2025-07.pdf",
-      "pdfPage": 0
-    },
-    {
-      "id": 23,
-      "type": "pdf-extract",
-      "title": "030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf",
-      "body": "030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf\nPage 0\nPDF: 030-057_Migraene_Therapie_Prophylaxe_2025-11.pdf",
-      "pdfPage": 0
-    },
-    {
-      "id": 32,
       "type": "topic",
-      "title": "Initial Motor NCS Settings",
-      "body": "Initial Motor NCS Settings\r\n\nSweep speed 2–3 msec/division\r\n\nSensitivity (gain) 5000 µV/division (this means the same as 5 millivolts, 5 mV or 5 K microvolts)\r\n\nLow-frequency filter 10 Hz\r\n\nHigh-frequency filter 10 kHz"
-    },
-    {
-      "id": 36,
-      "type": "topic",
-      "title": "Large stimulus artifact may falsely decrease the amplitude and increase the late",
-      "body": "Large stimulus artifact may falsely decrease the amplitude and increase the latency. (Adapted \r\n\nfrom Preston DC, Shapiro BE. Electromyography and Neuromuscular Disorders. London: Butterworth-\r\n\nHeinemann; 1998.)"
-    },
-    {
-      "id": 38,
-      "type": "topic",
-      "title": "An important concept in NCS is to understand supramaximal stimulation. The botto",
-      "body": "An important concept in NCS is to understand supramaximal stimulation. The bottom line is\r\n\nthis: nearly all measurements made in NCS are done with the assumption that the strength of\r\n\nthe stimulus is high enough to depolarize every axon in the nerve (H-reflexes being a notable\r\n\n[...] exception). This is achieved by gradually increasing the stimulus strength until you reach the\r\n\npoint where the amplitude of the waveform is no longer increasing. That is the point of\r\n\nsupramaximal stimulation. If supramaximal stimulation is not achieved at a distal site, then you\r\n\nmight mistakenly interpret this recording as signifying axonal loss due to the low amplitude. At\r\n\na proximal site, this might appear to be conduction block (failure of an action potential to be\r\n\nconducted past a particular point whereas conduction is possible below the point of the block).\r\n\nIn both instances, anomalous innervation or nerve injury may be suspected incorrectly.\r\n\nOf course, the old adage, too much of a good thing is not good, applies to many things in\r\n\nlife. When it comes to stimulation in NCS, too much stimulation may cause co-stimulation of\r\n\nadjacent nerves or may stimulate nerves farther from the site (falsely lowering the latency). So,\r\n\nthe goal is to reach supramaximal stimulation without applying so much stimulation that adjacent\r\n\nnerves are also stimulated."
-    },
-    {
-      "id": 43,
-      "type": "topic",
-      "title": "While nerves have a physiological direction (from the spine in the case of motor",
-      "body": "While nerves have a physiological direction (from the spine in the case of motor nerves and\r\n\nto the spine in the case of sensory nerves), if a nerve is electrically stimulated anywhere along its\r\n\ncourse, waves of depolarization will travel in both directions from that point. Nerve conduction\r\n\ncan be measured orthodromically (physiological direction of nerve conduction) or antidromically\r\n\n(opposite to the physiological direction). Motor and sensory nerve action potentials can be\r\n\nmeasured through skin electrodes if the nerve is sufficiently superficial. It is more common (and\r\n\ntechnically easier) to measure motor nerves by recording electrical activity from the muscle it\r\n\ninnervates."
+      "title": "Alzheimer-Demenz, vaskuläre Demenz und",
+      "body": "Alzheimer-Demenz, vaskuläre Demenz und \n\nMischformen beider Demenzen machen zusam-\n\nmen ca. 90% aller Demenzen aus. Die restlichen \n\n10% der Demenzen sind symptomatisch und treten \n\ninfolge einer anderen, definierten Erkrankung auf",
+      "priority": 63
     },
     {
       "id": 24,
-      "type": "pdf-extract",
-      "title": "Bradley's Neurology in Clinical Practice 8th Edition.pdf",
-      "body": "Bradley's Neurology in Clinical Practice 8th Edition.pdf\nPage 589\nPDF: Bradley's Neurology in Clinical Practice 8th Edition.pdf",
-      "pdfPage": 589
-    },
-    {
-      "id": 47,
       "type": "topic",
-      "title": "Conduction Velocity",
-      "body": "Conduction Velocity\r\n\nConduction velocity is how fast the nerve is propagating an action potential. It can be calculated\r\n\nby the formula:\r\n\nvelocity = distance/time\r\n\nAs stated earlier, sensory nerves do not have a myoneural junction. Therefore, conduction velocity\r\n\ncan be calculated directly by measuring the time it takes (in milliseconds) for the propagated\r\n\naction potential to travel the measured distance (in centimeters). Because motor nerves do\r\n\nconduct across a myoneural junction, the conduction velocity cannot be measured directly.\r\n\nTherefore, we use the formula:\r\n\nvelocity = change in distance/change in time\r\n\n[...] At least two sites must be stimulated. (The same nerve is stimulated both proximally and distally\r\n\nwhile recording over the same muscle.) The difference in distance from the two stimulation sites\r\n\n[...] is then divided by the difference in latencies of the two action potentials obtained. Normal\r\n\nconduction velocities average above 50 m/sec in the upper extremities and above 40 m/sec in the\r\n\nlower extremities."
+      "title": "Besteht neben der",
+      "body": "Besteht neben der\n\nGedächtnisstörung eine Werkzeugstörung (z.B.\n\nApraxie, Aphasie, räumliche Orientierungsstörung),\n\nspricht man auch von einer kortikalen Demenz.",
+      "priority": 7
     },
     {
-      "id": 8,
-      "type": "pdf-extract",
-      "title": "Harrison's Neurology in Clinical Medicine, 3E",
-      "body": "Harrison's Neurology in Clinical Medicine, 3E\nPage 51\nPDF: Harrisons Neurology in Clinical Medicine, 3E.pdf",
-      "pdfPage": 51
+      "id": 22,
+      "type": "topic",
+      "title": "Pathophysiologie: Ursache einer vaskulären De-",
+      "body": "Pathophysiologie: Ursache einer vaskulären De-\n\nmenz ist meist eine schwere, disseminierte Mikro-\n\nTab.30.1 Ursachen für Demenzen.\n\nUrsache Krankheitsbild (Beispiele)\n\nprimär neurodegenerativ Morbus Alzheimer, Demenz vom Frontalhirntyp (z.B. Morbus Pick), Lewy-\n\nKörper-Demenz\n\nzerebrovaskulär vaskuläre Demenz\n\nhereditär vaskulär CADASIL\n\nentzündlich HIV\n\nendokrin, metabolisch, toxisch Dialyse-Demenz, Demenz bei Hypothyreose oder Vitamin-B12-Mangel\n\nintrakranielle Raumforderung Hirntumor\n\nparaneoplastisch limbische Enzephalitis\n\nandere Ursachen Normaldruckhydrozephalus\n\nFall 30 von S. 41\n\nangiopathie infolge einer langjährigen unzurei-\n\nchend behandelnden arteriellen Hypertonie oder \n\neines Diabetes mellitus, bei der es zu einer Skle-\n\nrosierung und einem Verschluss kleiner zerebraler \n\nArteriolen kommt. Eine ähnliche Problematik kann \n\nselten auch nach einer im Rahmen einer Tumorthe-\n\nrapie durchgeführten Hirnbestrahlung auftreten. \n\nEine weitere Ursache einer vaskulären Demenz ist \n\ndas Vorliegen einer Amyloidangiopathie, bei der \n\ndurch Amyloideinlagerungen die Gefäßbrüchigkeit \n\nzunimmt und multiple kleine Mikroblutungen, aber \n\nauch größere intrazerebrale Hämatome auftreten \n\nkönnen. Die charakteristischen Mikroblutungen sind \n\nin der Bildgebung oft erst in speziellen SWI-Sequen-\n\nzen desMRT (Abb. 30.2) erkennbar, daher wird die \n\nDiagnose einer Amyloidangiopathie in den letzten \n\nJahren mit Fortschritten der MR-Bildgebung zuneh-\n\nmend häufiger gestellt.\n\nEine seltene Form der hereditären Vaskulopathie\n\nist CADASIL (Cerebral-Autosomal-Dominant-Arterio-\n\npathy-with-Subcortical-Infarcts-and-Leukoencepha-\n\nlopathy), bei der im mittleren Lebensalter gehäuft\n\nHirninfarkte und am Ende eine vaskuläre Demenz\n\nauftreten.",
+      "priority": 54
     },
     {
       "id": 31,
       "type": "topic",
-      "title": "Every signal in both NCS and EMG passes through both",
-      "body": "Every signal in both NCS and EMG passes through both\r\n\na low-frequency and a high-frequency filter before being displayed. Low-frequency filters are called\r\n\nhigh pass because they let high-frequency signals pass through. The range at which there is a\r\n\ncut-off of low-frequency signals depends on how you set the filter. Similarly, high-frequency filters\r\n\nare called low pass because they let low-frequency signals through. It is important to understand\r\n\nthat there is always a trade-off when you use filters. The signal you want will be altered to some\r\n\ndegree. For example, as the low-frequency filter is reduced, more low-frequency signals pass\r\n\nthrough and the duration of the recorded potential will be slightly longer. Likewise, if the high-\r\n\nfrequency filter is decreased, more high-frequency signals are excluded and the latency of the\r\n\nrecorded potential may be delayed"
+      "title": "Differenzialdiagnose: Sinusthrombose (ST);",
+      "body": "Differenzialdiagnose: Sinusthrombose (ST); \n\nBegründung: Disposition (Schwangerschaft), \n\nKopfschmerzen als Initialsymptom, epileptischer \n\nKrampfanfall, Bewusstseinseintrübung",
+      "priority": 10
+    },
+    {
+      "id": 32,
+      "type": "topic",
+      "title": "i.v.-Antikoagulation mit Heparin:",
+      "body": "i.v.-Antikoagulation mit Heparin:\n\n▪initialer Bolus: Heparin 5000IE i.v.\n\n▪danach Vollheparinisierung über Perfusor (Ziel-\n\nPTT ca. doppelter Ausgangswert = 80 bis max.\n\n[...] 100s): Heparin 30000–35000 IE/d; Ziel-PTT \n\ndamit trotz intrazerebraler Blutung höher als \n\nbei Herzinfarkt oder Vorhofflimmern\n\n▪alternativ niedermolekulare Heparine in äqui-\n\nvalenter Dosierung\n\n▪in diesem konkreten Fall: Geburtseinleitung VOR \n\nBeginn der Antikoagulation anzuraten! Da beim \n\nPressen Hirndrucksteigerungen auftreten können, \n\nist die Durchführung einer Sectio vorzuziehen. \n\nTritt eine ST in der Frühschwangerschaft auf, \n\nmuss eine Antikoagulation u.U. trotz bestehender \n\nSchwangerschaft durchgeführt werden (Risiko-\n\nabwägung)\n\n▪symptomatische Therapie der Ko\n\n[...] r\n\n[...] pfschmerzen: \n\nParacetamol, Metamizol, Opioide (z.B. Tramadol)\n\n▪cave: keine NSAR/ASS wegen additiver gerin-\n\nnungshemmender Wirkung und Gefahr eines \n\nvorzeitigen Verschlusses des Ductus arteriosus \n\nBotalli beim Fetus!\n\n[...] Behandlung der epileptischen Anfälle (Patienten \n\nmit ST neigen zu Serien bzw. zum Status epilep-\n\nticus):\n\n▪Erforderlich ist die Wahl einer Substanz, die \n\n„schnell“ i.v. aufgesättigt werden kann, z.B. \n\nLevetiracetam: Dosierung bei normaler Nieren-\n\nfunktion: 2×500mg/d, Dosissteigerung nach \n\n3d auf 2×1000mg/d (max. 2×1500mg; auch \n\n„Schnellaufsättigung“ über Kurzinfusionen \n\nmöglich), alternativ Valproat (nicht in der \n\nFrühschwangerschaft), Phenytoin oder Benzo-\n\ndiazepine (vgl. Fall 20 Status epilepticus).\n\n▪keine „prophylaktische“ Gabe von Antiepileptika\n\n▪bei ausgeprägter ST mit Koma oder anderen \n\nHirndruckzeichen Hirndrucktherapie auf der \n\nIntensivstation: Kopfhochlagerung, Beatmung, \n\nHyperventilation, evtl. kurzfristige Gabe von \n\nMannitol; die Gabe von Dexamethason wird \n\nkontrovers diskutiert, kann aber bei manifest \n\nerhöhtem Hirndruck durchgeführt werden (ini-\n\ntialer Bolus 40mg i.v., dann 3×4–8mg/d i.v.). Bei \n\nanhaltendem Hirndruck Anlage einer externen \n\nLiquordrainage, in extremen Fällen be\n\n[...] eidseitige \n\nDekompressionskraniektomie.\n\n[...] Wie gehen Sie therapeutisch vor?",
+      "priority": 34
+    },
+    {
+      "id": 34,
+      "type": "topic",
+      "title": "h",
+      "body": "h\n\n[...] In Stillzeit (und Schwangerschaft) ist die sonst \n\nübliche Weiterbehandlung mit Phenprocoumon\n\n(Marcumar®) für 6 Monate kontraindiziert (Plazen-\n\ntagängigkeit, Teratogenität, Übertritt in die Mutter-\n\nmilch). Daher wird die Patienten für den gleichen \n\n[...] Zeitraum mit niedermolekularem Heparin (z.B. \n\nClexane®, Fragmin® P) in körpergewichtsadaptierter \n\nDosis (s. Beipackzettel der jeweiligen Hersteller) \n\nweiterbehandelt.",
+      "priority": 29
+    },
+    {
+      "id": 35,
+      "type": "topic",
+      "title": "CT ohne Kontrastmittel (Nativ-CT) zeigt in vielen",
+      "body": "CT ohne Kontrastmittel (Nativ-CT) zeigt in vielen \n\nFällen keinen pathologischen Befund oder lediglich \n\neine Diapedeseblutung mit häufig „atypischer“ \n\nLokalisation (s.a. Frage 35.3). Nach Kontrastmittel-\n\ngabe ist zwar manchmal bei ausgeprägter ST ein \n\nThrombus durch eine Kontrastmittelaussparung \n\ndarstellbar (sog. Empty-Triangel- oder Delta-Sign), \n\nin der Regel ist dies aber frühestens nach 3 Tagen \n\nKrankheitsdauer möglich, so dass die Diagnose oft \n\nzu spät gestellt wird. Hilfreich ist eher die Durch-\n\nführung einer CT-Angiografie mit Darstellung der \n\nvenösen Phase (Abb.35.2). Kleinere Thromben sind \n\nso jedoch nicht immer zu erkennen. Beim CT be-\n\nsteht generell eine Strahlenbelastung, so dass es bei \n\nSchwangeren relativ kontraindiziert ist. Zusätzlich \n\nkann das jodhaltige CT-Kontrastmittel allergische \n\nReaktionen verursachen. Bildgebung der Wahl zum \n\nNachweis einer ST ist heute das MRT, am besten in \n\nKombination mit einer venösen kontrastmittel-\n\nunterstützten MR-Angiografie (vMRA). Lässt sich \n\nim zerebralen MRT bereits die ST durch eine fehlen-\n\nde Blutflussdarstellung im Sinus hinreichend bele-\n\ngen (sog. fehlendes Flow-Void-Zeichen, sind weitere \n\nbildgebende Verfahren nicht erforderlich.",
+      "priority": 27
+    },
+    {
+      "id": 12,
+      "type": "topic",
+      "title": "Dystonic posturing is a sustained contraction that results in an abnormal postur",
+      "body": "Dystonic posturing is a sustained contraction that results in an abnormal posture with a rotating or twisting motion.",
+      "priority": 68
+    },
+    {
+      "id": 41,
+      "type": "topic",
+      "title": "Unter Therapie beträgt die Letalität der",
+      "body": "Unter Therapie beträgt die Letalität der \n\naseptischen ST etwa 5–15%, die der septischen \n\nST 30–80%. Neurologische Ausfallerscheinungen \n\nbilden sich meist gut zurück. Rezidive treten meist \n\ninnerhalb von 1 Jahr auf, das Rezidivrisiko ist aber \n\nals gering einzustufen. Als Folgekrankheit einer \n\nSinusthrombose kann sich eine chronische Liquor-\n\ndruckerhöhung (Pseudotumor cerebri, s. Fall 41) \n\nentwickeln.",
+      "priority": 15
+    },
+    {
+      "id": 13,
+      "type": "topic",
+      "title": "Clonic activity refers to a regularly repetitive jerking that is prolonged.",
+      "body": "Clonic activity refers to a regularly repetitive jerking that is prolonged.",
+      "priority": 66
     },
     {
       "id": 37,
       "type": "topic",
-      "title": "Making sure",
-      "body": "Making sure\r\n\nthe ground is between the recording and stimulating electrodes can minimize stimulus artifact."
+      "title": "Ätiologie:",
+      "body": "Ätiologie:\n\n▪aseptische ST: Gerinnungsstörungen (z.B. AT-III-, \n\nProtein S-, Protein-C-Mangel; Antiphospholipid-\n\nAntikörper-Syndrom), Kollagenosen, Vaskulitiden, \n\nExsikkose, Tumoren, hormonelle Veränderungen \n\n(Schwangerschaft, Wochenbett, Einnahme von \n\nKontrazeptiva)\n\n▪septische ST: am häufigsten Lokalinfektion im \n\nGesicht oder Ohr, Meningitis",
+      "priority": 12
     },
     {
-      "id": 44,
+      "id": 20,
       "type": "topic",
-      "title": "Velocities in myelinated axons range from 40 to 70 m/sec. Unmyelinated axons, in",
-      "body": "Velocities in myelinated axons range from 40 to 70 m/sec. Unmyelinated axons, in contrast,\r\n\nare much slower – in the range of 1–5 m/sec. Unmyelinated axons do not conduct through\r\n\n[...] saltatory conduction but have voltage-dependent channels located uniformly throughout the\r\n\nnerve. The speed of nerve conduction is largely contingent upon the amount of time it takes for\r\n\nvoltage-dependent channels to open. Because unmyelinated nerves have a far greater number of\r\n\nchannels per length of nerve, they conduct at less than one-tenth the speed of a myelinated nerve.\r\n\nThe most important points to remember about myelin are:\r\n\n■ Myelin helps nerves propagate an action potential faster.\r\n\n■ The myelin sheath functions as insulator of the axon.\r\n\n■ In myelinated nerves, depolarization occurs only at areas devoid of myelin (nodes of\r\n\nRanvier) resulting in saltatory conduction.\r\n\n■ Conduction velocity is directly related to internodal length and efficiency of myelin\r\n\ninsulation"
+      "title": "Bei der vaskulären Demenz wird das",
+      "body": "Bei der vaskulären Demenz wird das \n\nHirnparenchym infolge vaskulärer Erkrankungen\n\ndisseminiert geschädigt, in der Folge werden in-\n\ntellektuelle Funktionen beeinträchtigt. Sie ist die \n\nzweithäufigste Demenzerkrankung nach der Alz-\n\nheimer-Demenz. Teilweise historische Begriffe sind \n\ndie Krankheitsbezeichnungen Multiinfarktdemenz, \n\nStatus lacunaris, Morbus Binswanger (subkor-\n\ntikale arteriosklerotische Enzephalopathie) oder \n\nstrategische Infarkte. Heute subsumiert man diese \n\nFormen bei gleichzeitigem Vorliegen einer Demenz \n\nunter dem Oberbegriff „vaskuläre Demenz“.",
+      "priority": 59
+    },
+    {
+      "id": 36,
+      "type": "topic",
+      "title": "Risikofaktoren sind – wie für Thrombosen",
+      "body": "Risikofaktoren sind – wie für Thrombosen \n\nanderer Körperregionen – Rauchen, die Einnahme \n\nder „Pille“, Übergewicht, Schwangerschaft oder das \n\nVorliegen genetischer „Thrombophilien“.",
+      "priority": 24
+    },
+    {
+      "id": 40,
+      "type": "topic",
+      "title": "Therapeutisch ist die Vollheparinisie-",
+      "body": "Therapeutisch ist die Vollheparinisie-\n\nrung bis zur deutlichen klinischen Besserung, meist \n\nfür 2–3 Wochen, die Methode der Wahl. Dies gilt\n\nauch, wenn – wie in ca. 30% der Fälle – eine intraze-\n\nrebrale Blutung vorliegt. Die pathophysiologische \n\nÜberlegung dieser zunächst paradox anmutenden \n\nTherapieempfehlung ist, dass es sich um Diapedese-\n\nblutungen aufgrund der venösen Stase handelt, die \n\nGefäße aber intakt sind, so dass Heparin der wei-\n\nteren Thrombosierung vorbeugt, die Gefahr einer \n\n[...] Nachblutung jedoch gering ist. Bei Heparinunver-\n\nträglichkeit können niedermolekulare Heparine in \n\ngewichtsadaptierter Dosis gegeben werden. Im An-\n\nschluss erfolgt eine überlappende Behandlung mit \n\nPhenprocuomon für 6 Monate (Ziel-INR: 2,5–3,5). \n\nAlternativ kann mit niedermolekularen Heparinen \n\nbehandelt werden. Für die „neueren“ oralen Anti-\n\nkoagulantien, wie z.B. Rivaroxaban, liegen bei der \n\nST noch keine ausreichenden Erfahrungen vor. Ist \n\neine bleibende Gerinnungsstörung die Ursache der \n\nST, muss u.U. eine lebenslange Antikoagulation er-\n\nfolgen.\n\nExperimentelle Therapieformen sind die syste-\n\nmische oder lokale Lysebehandlung mit Urokinase \n\nbzw. rtPA bzw. die direkte Thrombektomie über \n\nAngiografiekatheter. Bislang wurde jedoch keine \n\nÜberlegenheit dieser Therapie gegenüber der Hepa-\n\nrinisierung nachgewiesen. Die Komplikationsraten \n\n– insbesondere Blutungsraten – dieser Verfahren \n\nsind hoch, so dass sie derzeit nur als Ultima Ratio bei \n\nschwerstbetroffenen Patienten mit ansonsten un-\n\ntherapierbaren Hirndruckzeichen eingesetzt werden \n\nsollten.\n\n[...] Bei septischer ST muss der Primärinfekt \n\nschnellstmöglich saniert werden und eine Anti-\n\nbiotikatherapie erfolgen. Bis zum Eintreffen des \n\nAntibiogramms kann kalkuliert z.B. mit Meropenem \n\n(3×2g/d) und Vancomycin (initial 2×1g/d, dann \n\nentsprechend dem Blutspiegel) bei nosokomialen \n\nInfektionen, ansonsten z.B. mit Ceftriaxon (1× 2g/d), \n\nFosfomycin (3×5g/d) und Metronidazol (3×0,5g/d) \n\nbehandelt werden. Prinzipiell muss auch bei septi-\n\nscher ST heparinisiert werden. Bei fortgeschrittener \n\nSepsis ist dies jedoch kontraindiziert, da massive \n\nEinblutungen in innere Organe möglich sind",
+      "priority": 17
+    },
+    {
+      "id": 30,
+      "type": "topic",
+      "title": "Therapie: Spezifische Therapieansätze existieren",
+      "body": "Therapie: Spezifische Therapieansätze existieren \n\nnicht. Wichtig ist die adäquate Behandlung von \n\nGefäßrisikofaktoren, v.a. der arteriellen Hyper-\n\ntonie. Eine Schlaganfallprophylaxe, z.B. mit Acetyl-\n\nsalicylsäure oder Clopidogrel, erscheint sinnvoll, \n\nwenn eine Mikroangiopathie zugrunde liegt. Bei der \n\nAmyloidangiopathie steigt die Blutungsgefahr je-\n\ndoch eher noch, so dass Thrombozytenaggregations-\n\nhemmer und Antikoagulantien hierbei relativ kon-\n\ntraindiziert sind. Cholinesterase-Hemmer oder der\n\n[...] NMDA-Antagonist Memantin haben nach aktueller \n\nDatenlage keinen Nutzen. Supportive Maßnahmen \n\nsind Krankengymnastik, Logopädie und Ergothe-\n\nrapie.\n\nPrognose: Der Verlauf einer vaskulären Demenz ist \n\nschwer vorhersehbar, die Lebenserwartung jedoch \n\nhäufig verkürzt. Häufige Todesursachen sind Pneu-\n\nmonien durch lange Bettlägerigkeit und weitere \n\nGefäßkomplikationen wie Schlaganfälle und akute \n\nKoronarsyndrome.",
+      "priority": 37
+    },
+    {
+      "id": 11,
+      "type": "topic",
+      "title": "Approximately 88% of these strokes are ischemic.",
+      "body": "Approximately 88% of these strokes are ischemic.",
+      "priority": 71
+    },
+    {
+      "id": 26,
+      "type": "topic",
+      "title": "Die vasku-",
+      "body": "Die vasku-\n\nläre Demenz ist eher eine Demenz vom subkortika-\n\nlen Typ, die Alzheimer-Demenz eher eine kortikale\n\nDemenz. Bei der vaskulären Demenz steht somit\n\nzu Beginn der Erkrankung die Gedächtnisstörung\n\nnicht im Vordergrund. Oft verschlechtert sich hier\n\ndie Symptomatik durch neue subkortikale Infarkte\n\nschubweise.",
+      "priority": 46
+    },
+    {
+      "id": 27,
+      "type": "topic",
+      "title": "Für",
+      "body": "Für \n\ndie vaskuläre Demenz ist entscheidend:\n\n▪Nachweis einer (subkortikalen) Demenz\n\n▪Hinweise auf zerebrovaskuläre Defekte:\n\n▪Nachweis von Gefäßrisikofaktoren, v.a. \n\narterielle Hypertonie\n\n▪CT oder MRT: vaskulär erklärbare Läsionen in \n\nausreichender Anzahl, v.a. im Marklager der \n\nGroßhirnhemisphären („White-Matter-Lesi-\n\nons“), im Thalamus und im oberen Hirnstamm\n\n▪klinische Zeichen einer zentralen fokalen \n\nLäsion: z.B. positive Pyramidenbahnzeichen, \n\nHemiparese, Kleinhirnsymptomatik, gesteigerte \n\nMuskeleigenreflexe\n\n▪diskontinuierliche Entwicklung, oft plötzliche \n\nVerschlechterung im Rahmen eines erneuten \n\nvaskulären Ereignisses, Fluktuationen\n\n▪Hilfreich ist der Nachweis eines zeitlichen \n\nZusammenhangs zwischen dem Auftreten der \n\nDemenz und den Hirndefekten (in der Praxis oft \n\nnicht möglich).\n\n▪Ausschluss anderer Demenzformen:\n\n▪ausführliche Laboruntersuchungen: Hinweise \n\nauf metabolische Störungen? Vitamin-B12-Spie-\n\ngel, Luesserologie, ggf. HIV-Test\n\n▪in unklaren Fällen: Bildgebung → DD Normal-\n\ndruckhydrozephalus, Raumforderung\n\n▪in unklaren Fällen: Lumbalpunktion → Aus-\n\nschluss von entzündlichen ZNS-Prozessen, die \n\nmit einer Demenz einhergehen, z.B. HIV oder \n\nNeurolues\n\n▪in unklaren Fällen: Bestimmung von Demenz-\n\nmarkern (z.B. Tau, Phospho-Tau, Beta-42-\n\nAmyloid)",
+      "priority": 44
+    },
+    {
+      "id": 10,
+      "type": "topic",
+      "title": "A myoclonic jerk or myoclonus refers to a very brief involuntary contraction usu",
+      "body": "A myoclonic jerk or myoclonus refers to a very brief involuntary contraction usually lasting less than 100 ms.",
+      "priority": 73
+    },
+    {
+      "id": 29,
+      "type": "topic",
+      "title": "Wie gehen Sie weiter vor, um die Verdachts-",
+      "body": "Wie gehen Sie weiter vor, um die Verdachts-\n\ndiagnose Eklampsie zu bestätigen?\n\n▪Blutdruckmessung (Leitsymptom = Hypertonie)\n\n▪körperliche Untersuchung: generalisierte \n\nÖdeme; Überprüfung des Gewichtsverlaufs der \n\nSchwangeren (normal: <500g/Woche in den \n\nletzten 3 Monaten der Schwangerschaft)\n\n▪Proteinbestimmung im 24-h-Sammelurin\n\n(normal: <0,3g/l)",
+      "priority": 39
+    },
+    {
+      "id": 21,
+      "type": "topic",
+      "title": "Bei angeborenen",
+      "body": "Bei angeborenen\n\noder frühkindlich erworbenen Gedächtnisstörun-\n\ngen spricht man von Oligophrenie.",
+      "priority": 56
+    },
+    {
+      "id": 25,
+      "type": "topic",
+      "title": "Überwiegen Störungen des Affekts, des Antriebs,",
+      "body": "Überwiegen Störungen des Affekts, des Antriebs,\n\nder Konzentration, der Vigilanz und der Auffassung,\n\nwird dies als subkortikale Demenz bezeichnet",
+      "priority": 49
+    },
+    {
+      "id": 38,
+      "type": "topic",
+      "title": "Die ST ist – wie auch Neurolues und multi-",
+      "body": "Die ST ist – wie auch Neurolues und multi-\n\nple Sklerose – ein „Chamäleon“: Sowohl Symptome \n\nals auch Verlauf sind sehr variabel. Häufige Symp-\n\ntome sind Kopfschmerzen, Vigilanzminderungen, \n\nfokale epileptische Anfälle (z.T. mit sekundärer \n\nGeneralisierung) und Stauungspapille. Möglich \n\nsind aber auch ausgeprägte psychopathologische \n\nPhänomene, die bei Schwangeren an eine schwan-\n\ngerschaftsinduzierte Psychose denken lassen. \n\nSensomotorische Erscheinungen bis zur Halb-\n\nseitenlähmung können vorkommen. \n\n[...] Relativ cha-\n\n[...] rakteristisch ist ein Fluktuieren mit wechselnder \n\nAusprägung der Symptome, manchmal auch ein \n\n„Überspringen“ auf die Gegenseite. Das klinische Er-\n\nscheinungsbild ist nicht zuletzt auch deshalb so viel-\n\ngestaltig, weil die Symptomatik davon abhängig ist, \n\nwelcher Sinus bzw. welche Hirnvene betroffen ist, \n\nwie ausgeprägt die Thrombose ist und inwiefern der \n\nvenöse Abfluss über Kollateralen möglich ist. ST ver-\n\nlaufen nicht selten klinisch inapparent und werden \n\nnur „zufällig“ bei späterer Durchführung eines cMRT \n\ndiagnostiziert.",
+      "priority": 22
+    },
+    {
+      "id": 23,
+      "type": "topic",
+      "title": "Kennzeichnend für eine Demenz ist eine",
+      "body": "Kennzeichnend für eine Demenz ist eine\n\nerworbene Gedächtnisstörung.\n\n[...] Zusätzlich ist\n\nmindestens eine weitere kognitive Fähigkeit ein-\n\ngeschränkt (z.B. Denken, Planen, Urteilen, neuro-\n\n[...] psychologische Fähigkeiten [z.B. Aphasie, Apraxie,\n\nAgnosie]). Außerdem sind Störungen von Affekt,\n\nAntrieb, Konzentration, Vigilanz und Auffassung\n\nnachweisbar und das Alltagsleben ist beeinträch-\n\ntigt. Die Dauer dieser Symptome und Syndrome\n\nmuss ≥6 Monaten betragen.",
+      "priority": 51
+    },
+    {
+      "id": 19,
+      "type": "image",
+      "title": "Element 19",
+      "body": null,
+      "imageFile": "19.png",
+      "priority": 61
+    },
+    {
+      "id": 9,
+      "type": "topic",
+      "title": "Tonic-clonic activity is a sequence of initial tonic posturing that evolves to a",
+      "body": "Tonic-clonic activity is a sequence of initial tonic posturing that evolves to a clonic phase. Atonic activity refers to a sudden decrease or loss of muscle tone usually lasting more than 1 second.",
+      "priority": 76
+    },
+    {
+      "id": 28,
+      "type": "topic",
+      "title": "Im klinischen",
+      "body": "Im klinischen \n\nAlltag hat sich zwar der Mini-Mental-State-Test\n\netabliert, er hat jedoch bei leichten Demenzformen \n\nwenig Trennschärfe und bei fortgeschritteneren \n\nDemenzen benötigt man ihn eigentlich nicht mehr",
+      "priority": 41
     }
   ],
-  "generated": "2026-05-18T22:12:38.396Z"
+  "generated": "2026-08-31T21:13:06.236Z"
 }

@@ -90,6 +90,29 @@ function parseCloze(html) {
   return { clozeSentence: stripHtml(blank) };
 }
 
+function decodeB64Utf8(value) {
+  try { return Buffer.from(value, 'base64').toString('utf8'); }
+  catch { return ''; }
+}
+
+// SMGo-created Items carry explicit metadata on their question component.
+// This survives SuperMemo's component storage without guessing relationships
+// from neighboring element IDs.
+function parseSmgoItem(html) {
+  const type = /data-smgo-type=["'](qa|cloze)["']/i.exec(html)?.[1]?.toLowerCase();
+  if (type === 'qa') {
+    const b64 = /data-smgo-answer-b64=["']([^"']*)["']/i.exec(html)?.[1] || '';
+    const answer = decodeB64Utf8(b64);
+    if (answer) return { type, answer };
+  }
+  if (type === 'cloze') {
+    const b64 = /data-smgo-sentence-b64=["']([^"']*)["']/i.exec(html)?.[1] || '';
+    const sentence = decodeB64Utf8(b64);
+    if (sentence) return { type, sentence };
+  }
+  return null;
+}
+
 // Find the parent .pdf file for a pdf-extract element.
 // SM creates the parent PDF element first (ID=N), then child extracts (N+1, N+2…)
 // in the same elements subdirectory. Walk backwards from id-1 to find the nearest .pdf.
@@ -159,6 +182,16 @@ function buildCardFromHtml(id, filePath) {
   try { html = fs.readFileSync(filePath, 'utf-8').replace(/^﻿/, ''); }
   catch { return { id, type: 'error', title: `Element ${id}`, body: null }; }
 
+  const smgoItem = parseSmgoItem(html);
+  if (smgoItem?.type === 'qa') {
+    const body = stripHtml(html);
+    return { id, type: 'qa', title: `Q&A ${id}`, body, answer: smgoItem.answer };
+  }
+  if (smgoItem?.type === 'cloze') {
+    return { id, type: 'cloze', title: `Cloze ${id}`,
+             body: stripHtml(html), clozeSentence: smgoItem.sentence };
+  }
+
   // Is this a PDF-reference wrapper?
   if (html.includes('id=pdf-element-filename')) {
     const { title, filename, page } = parsePdfElement(html);
@@ -205,8 +238,10 @@ function getPriorityMap() {
 }
 
 // Return all outstanding cards for today — renderable types only.
-// Q&A pairs (question ends with "?", answer at id+1) are merged: answer is
-// embedded into the question card and the answer card is removed from the list.
+// Do not infer Q&A relationships from adjacent element IDs. SuperMemo topics
+// commonly end in questions and adjacent extracts are not necessarily answers.
+// Native Q&A items store question and answer as components of one Item and need
+// explicit component-aware parsing rather than a positional guess.
 function getTodayCards() {
   const ids         = getOutstandingIds();
   const priorityMap = getPriorityMap();
@@ -216,27 +251,14 @@ function getTodayCards() {
     if (p !== undefined) card.priority = p;
     return card;
   }).filter(c =>
-    c.type === 'topic' || c.type === 'pdf-extract' || c.type === 'cloze' || c.type === 'image'
+    c.type === 'topic' || c.type === 'qa' || c.type === 'pdf-extract' || c.type === 'cloze' || c.type === 'image'
   );
 
-  // Detect and merge Q→A pairs
-  const answerIds = new Set();
-  const idMap = new Map(cards.map(c => [c.id, c]));
-  for (const card of cards) {
-    if (card.type !== 'topic') continue;
-    if (!card.body?.trimEnd().endsWith('?')) continue;
-    const answer = idMap.get(card.id + 1);
-    if (!answer || answer.type !== 'topic') continue;
-    if (answer.body?.trimEnd().endsWith('?')) continue; // answer is itself a question
-    if (!answer.body) continue; // empty answer — not a real pair
-    card.answer = answer.body;
-    card.answerPairId = answer.id;
-    answerIds.add(answer.id);
-  }
-  return cards.filter(c => !answerIds.has(c.id));
+  return cards;
 }
 
 module.exports = {
   getTodayCards, getOutstandingIds, findElementFile, findParentPdfFile,
   COLLECTION, collection,
+  _test: { parseSmgoItem },
 };

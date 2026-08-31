@@ -46,7 +46,9 @@ async function supaUpsert(table, row) {
       headers: {
         apikey: supa.key, Authorization: `Bearer ${supa.key}`,
         'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
+        // Queue command IDs are immutable idempotency keys. Never overwrite an
+        // existing row: in particular, a retry must not reset applied=true.
+        Prefer: 'resolution=ignore-duplicates,return=minimal',
       },
       body: JSON.stringify(row),
     }, 10_000);
@@ -114,6 +116,7 @@ function queueRow(type, payload, suffix, collectionId = payload.collectionId || 
     id: commandId,
     type,
     collection_id: collectionId,
+    applied: false,
     payload: { ...body, commandId },
   };
 }
@@ -424,14 +427,14 @@ function renderCard() {
   progressBar.style.width  = `${(idx / total) * 100}%`;
   progressText.textContent = `${idx} / ${total}`;
 
-  const typeLabel  = { topic: 'Topic', 'pdf-extract': 'PDF Extract', cloze: 'Cloze', image: 'Image' };
+  const typeLabel  = { topic: 'Topic', qa: 'Q&A', 'pdf-extract': 'PDF Extract', cloze: 'Cloze', image: 'Image' };
   const badgeClass = 'badge-' + (c.type || 'topic');
 
   let bodyHtml = '';
   if (c.type === 'cloze' && c.clozeSentence) {
     let n = 0;
-    const blanked = c.clozeSentence.replace(/\[___\]/g,
-      () => `<span class="cloze-blank" data-bi="${n++}">[___]</span>`);
+    const blanked = c.clozeSentence.replace(/\[([^\]]+)\]/g,
+      (_, answer) => `<span class="cloze-blank" data-bi="${n++}">${esc(answer)}</span>`);
     bodyHtml = `<div class="cloze-sentence">${blanked}</div>`;
     if (c.body) bodyHtml += `<div class="card-body selectable">${formatBody(c.body)}</div>`;
   } else if (c.type === 'image') {

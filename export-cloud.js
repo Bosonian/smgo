@@ -110,11 +110,16 @@ async function enrichPdfCards(cards) {
   await enrichPdfCards(cards);
 
   // Strip server-side pdfFile path before sending — it's meaningless to the PWA
-  const cleanCards = cards.map(c => {
-    if (c.type !== 'pdf-extract') return c;
-    const { pdfFile, ...rest } = c;
-    return rest;
-  });
+  const cleanCards = cards
+    // A PDF wrapper with no extracted page text cannot be reviewed in the PWA.
+    // Keep successfully enriched PDF cards; omit empty wrappers instead of
+    // exporting a misleading "No renderable content" card.
+    .filter(c => c.type !== 'pdf-extract' || Boolean(c.body?.trim()))
+    .map(c => {
+      if (c.type !== 'pdf-extract') return c;
+      const { pdfFile, ...rest } = c;
+      return rest;
+    });
 
   const payload = {
     protocolVersion: 2,

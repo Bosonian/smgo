@@ -54,6 +54,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
     private CollectionContext? _activeCollection;
     private long _nextCollectionGeneration;
     private int     _pollInProgress = 0; // 0=idle, 1=running — prevents overlapping polls
+    private int     _gradeApiUnavailable = 0;
+    private int     _dismissApiUnavailable = 0;
 
     // ── SMA lifecycle ─────────────────────────────────────────────────────
 
@@ -340,7 +342,16 @@ namespace SuperMemoAssistant.Plugins.SMGo
 
         Serilog.Log.Information("SMGo Supabase: {Count} items to apply", items.Count);
 
-        foreach (JObject item in items)
+        bool collectionChanged = false;
+        var orderedItems = new List<JObject>();
+        foreach (var token in items)
+          if (token is JObject obj) orderedItems.Add(obj);
+        orderedItems.Sort((a, b) =>
+        {
+          var byType = QueueTypeOrder(a["type"]?.ToString()).CompareTo(QueueTypeOrder(b["type"]?.ToString()));
+          return byType != 0 ? byType : string.CompareOrdinal(a["id"]?.ToString(), b["id"]?.ToString());
+        });
+        foreach (var item in orderedItems)
         {
           var id      = item["id"]?.ToString() ?? "";
           var type    = item["type"]?.ToString() ?? "";
@@ -380,12 +391,21 @@ namespace SuperMemoAssistant.Plugins.SMGo
             Serilog.Log.Warning(ex, "SMGo Supabase: failed to apply item {Id}", id);
           }
 
-          // Grade, dismiss, priority: mark applied regardless of success — these
-          // can silently fail (grade outside review session, element not in priority queue);
-          // retrying forever creates an infinite loop and duplicates create-type items.
-          if (applied) await MarkSupabaseApplied(id, context);
+          // Only acknowledge a verified success. Create commands are safe to
+          // retry because their durable marker is checked before mutation.
+          if (applied)
+          {
+            if (!await MarkSupabaseApplied(id, context))
+              Serilog.Log.Warning("SMGo will retry acknowledgement for queue item {Id}", id);
+            collectionChanged = true;
+          }
           await Task.Delay(600);
         }
+
+        // The startup export runs before the first cloud poll. Re-export once
+        // after the batch so newly created Q&A/cloze/extract Items and dismissed
+        // sources are reflected in the PWA during this same SM/SMA session.
+        if (collectionChanged && IsCurrent(context)) RunExportCloud();
       }
       catch (Exception ex) { Serilog.Log.Warning(ex, "SMGo Supabase poll error"); }
       finally
@@ -394,7 +414,20 @@ namespace SuperMemoAssistant.Plugins.SMGo
       }
     }
 
-    private async Task MarkSupabaseApplied(string id, CollectionContext context)
+    private static int QueueTypeOrder(string? type)
+    {
+      switch (type)
+      {
+        case "extract": case "pdf-extract-create": case "image-extract":
+        case "qa": case "cloze": case "edit": return 0;
+        case "priority": return 1;
+        case "grade": return 2;
+        case "dismiss": return 3;
+        default: return 4;
+      }
+    }
+
+    private async Task<bool> MarkSupabaseApplied(string id, CollectionContext context)
     {
       try
       {
@@ -404,20 +437,60 @@ namespace SuperMemoAssistant.Plugins.SMGo
         patch.Headers.Add("Authorization", $"Bearer {_supaKey}");
         patch.Headers.Add("Prefer", "return=minimal");
         patch.Content = new StringContent("{\"applied\":true}", Encoding.UTF8, "application/json");
-        using var _ = await _http.SendAsync(patch);
+        using var response = await _http.SendAsync(patch);
+        if (response.IsSuccessStatusCode) return true;
+        Serilog.Log.Warning("SMGo acknowledgement failed for {Id}: HTTP {Status}", id, (int)response.StatusCode);
+        return false;
       }
-      catch { }
+      catch (Exception ex)
+      {
+        Serilog.Log.Warning(ex, "SMGo acknowledgement failed for {Id}", id);
+        return false;
+      }
     }
 
     // ── Single-item apply helpers (shared between file-based and Supabase) ───
+
+    private static string CommandMarker(JObject payload)
+    {
+      var id = payload["commandId"]?.ToString();
+      if (string.IsNullOrWhiteSpace(id)) return "";
+      var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(id));
+      return $"<span data-smgo-command-b64=\"{encoded}\" style=\"display:none\"></span>";
+    }
+
+    private static bool AlreadyMaterialized(JObject payload, CollectionContext context)
+    {
+      var marker = CommandMarker(payload);
+      if (marker.Length == 0) return false;
+      var encoded = Regex.Match(marker, "data-smgo-command-b64=\\\"([^\\\"]+)").Groups[1].Value;
+      var needle = $"data-smgo-command-b64=\"{encoded}\"";
+      var elementsDir = Path.Combine(context.Root, "elements");
+      if (!Directory.Exists(elementsDir)) return false;
+      foreach (var file in Directory.EnumerateFiles(elementsDir, "*.htm", SearchOption.AllDirectories))
+      {
+        // SMGo prepends the marker to its component HTML. Limit reads so a
+        // large embedded image cannot turn a retry check into a memory spike.
+        var buffer = new char[131072];
+        int count;
+        using (var reader = new StreamReader(file, Encoding.UTF8, true))
+          count = reader.ReadBlock(buffer, 0, buffer.Length);
+        if (new string(buffer, 0, count).IndexOf(needle, StringComparison.Ordinal) >= 0)
+        {
+          Serilog.Log.Information("SMGo command already materialized: {Id}", payload["commandId"]);
+          return true;
+        }
+      }
+      return false;
+    }
 
     private bool ApplyOneExtract(JObject p, CollectionContext? context = null)
     {
       context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var text     = p["text"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
-      if (string.IsNullOrEmpty(text)) return false;
-      var html    = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      if (string.IsNullOrEmpty(text) || AlreadyMaterialized(p, context)) return !string.IsNullOrEmpty(text);
+      var html    = CommandMarker(p) + $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
       if (!IsCurrent(context)) return false;
@@ -431,8 +504,9 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var question = p["question"]?.ToString() ?? "";
       var answer   = p["answer"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
-      if (string.IsNullOrWhiteSpace(question)) return false;
-      var qHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(question)}</span>";
+      if (string.IsNullOrWhiteSpace(question) || AlreadyMaterialized(p, context)) return !string.IsNullOrWhiteSpace(question);
+      var answerB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(answer));
+      var qHtml = CommandMarker(p) + $"<span data-smgo-type=\"qa\" data-smgo-answer-b64=\"{answerB64}\" style=\"color:#231F20\">{WebUtility.HtmlEncode(question)}</span>";
       var aHtml = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(answer)}</span>";
       var qContent = new TextContent(true, qHtml);
       var aContent = new TextContent(true, aHtml) { DisplayAt = AtFlags.NonQuestion };
@@ -448,12 +522,13 @@ namespace SuperMemoAssistant.Plugins.SMGo
       context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var sentence = p["sentence"]?.ToString() ?? "";
       var parentId = p["parentId"]?.Value<int>() ?? 0;
-      if (string.IsNullOrWhiteSpace(sentence)) return false;
+      if (string.IsNullOrWhiteSpace(sentence) || AlreadyMaterialized(p, context)) return !string.IsNullOrWhiteSpace(sentence);
 
       // Question side: replace [word] with [...] in blue
       var qBlanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
         _ => "<span style=\"color:blue\">[...]</span>");
-      var qHtml = $"<span style=\"color:#231F20\">{qBlanked}</span>";
+      var sentenceB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(sentence));
+      var qHtml = CommandMarker(p) + $"<span data-smgo-type=\"cloze\" data-smgo-sentence-b64=\"{sentenceB64}\" style=\"color:#231F20\">{qBlanked}</span>";
 
       // Answer side: reveal blanked words in red — only shown after "Show Answer"
       var aBlanked = Regex.Replace(sentence, @"\[([^\]]+)\]",
@@ -475,11 +550,12 @@ namespace SuperMemoAssistant.Plugins.SMGo
       context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var parentId = p["parentId"]?.Value<int>() ?? 0;
       if (parentId <= 0) return false;
+      if (AlreadyMaterialized(p, context)) return true;
 
       // Mixed-content staged extract: segments[] array of {kind, text?, dataUrl?}
       if (p["segments"] is JArray segs && segs.Count > 0)
       {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(CommandMarker(p));
         foreach (var seg in segs)
         {
           var kind = seg["kind"]?.ToString();
@@ -514,7 +590,7 @@ namespace SuperMemoAssistant.Plugins.SMGo
       // Simple text-only extract
       var text = p["text"]?.ToString() ?? "";
       if (string.IsNullOrEmpty(text)) return false;
-      var html = $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
+      var html = CommandMarker(p) + $"<span style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</span>\n<span />";
       var simpleBuilder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
       if (!IsCurrent(context)) return false;
@@ -528,7 +604,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var parentId  = p["parentId"]?.Value<int>() ?? 0;
       var imageData = p["imageData"]?.ToString() ?? "";
       if (parentId <= 0 || string.IsNullOrEmpty(imageData)) return false;
-      var html    = $"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\"><span />";
+      if (AlreadyMaterialized(p, context)) return true;
+      var html    = CommandMarker(p) + $"<img src=\"{imageData}\" style=\"max-width:100%;height:auto\"><span />";
       var builder = new ElementBuilder(ElementType.Topic, new TextContent(true, html))
         .WithParent(parentId).DoNotDisplay();
       if (!IsCurrent(context)) return false;
@@ -542,13 +619,23 @@ namespace SuperMemoAssistant.Plugins.SMGo
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       var grade     = p["grade"]?.Value<int>() ?? -1;
       if (elementId <= 0 || grade < 0 || grade > 5) return false;
+      if (Volatile.Read(ref _gradeApiUnavailable) == 1) return false;
       if (!IsCurrent(context)) return false;
       Svc.SM.UI.ElementWdw.GoToElement(elementId);
       Thread.Sleep(400);
       if (!IsCurrent(context)) return false;
-      Svc.SM.UI.ElementWdw.AssignGrade(grade);
-      Thread.Sleep(200);
-      return true;
+      try
+      {
+        var applied = Svc.SM.UI.ElementWdw.AssignGrade(grade);
+        Thread.Sleep(200);
+        return applied;
+      }
+      catch (Exception ex) when (IsUnavailableInteropMethod(ex))
+      {
+        Interlocked.Exchange(ref _gradeApiUnavailable, 1);
+        Serilog.Log.Warning(ex, "SMGo left grade pending because this SMA/SM build cannot verify grading elem {Id}", elementId);
+        return false;
+      }
     }
 
     private bool ApplyOneDismiss(JObject p, CollectionContext? context = null)
@@ -556,13 +643,32 @@ namespace SuperMemoAssistant.Plugins.SMGo
       context ??= CaptureCollectionContext(); if (context == null || !IsCurrent(context)) return false;
       var elementId = p["elementId"]?.Value<int>() ?? 0;
       if (elementId <= 0) return false;
+      if (Volatile.Read(ref _dismissApiUnavailable) == 1) return false;
       // IElement.Done() calls the SM engine directly (bypasses the UI window),
       // so no confirmation dialog fires. This marks the element Dismissed and
       // removes it from the Outstanding queue permanently — equivalent to SM's Ignore.
       var element = Svc.SM.Registry.Element[elementId];
       if (element == null) return false;
       if (!IsCurrent(context)) return false;
-      return element.Done();
+      try
+      {
+        if (element.Done()) return true;
+      }
+      catch (Exception ex) when (IsUnavailableInteropMethod(ex))
+      {
+        Interlocked.Exchange(ref _dismissApiUnavailable, 1);
+        Serilog.Log.Warning(ex, "SMGo left dismiss pending because this SMA/SM build cannot dismiss elem {Id} safely", elementId);
+      }
+      return false;
+    }
+
+    private static bool IsUnavailableInteropMethod(Exception ex)
+    {
+      var text = ex.ToString();
+      return ex is NotImplementedException
+        || text.IndexOf("not implemented", StringComparison.OrdinalIgnoreCase) >= 0
+        || text.IndexOf("method", StringComparison.OrdinalIgnoreCase) >= 0
+           && text.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private bool ApplyOnePriority(JObject p, CollectionContext? context = null)
@@ -618,7 +724,8 @@ namespace SuperMemoAssistant.Plugins.SMGo
       if (parentId <= 0 || (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(imageData)))
         return false;
 
-      var sb = new StringBuilder();
+      if (AlreadyMaterialized(p, context)) return true;
+      var sb = new StringBuilder(CommandMarker(p));
       if (!string.IsNullOrWhiteSpace(text))
         sb.Append($"<p style=\"color:#231F20\">{WebUtility.HtmlEncode(text)}</p>");
       if (!string.IsNullOrWhiteSpace(imageData))

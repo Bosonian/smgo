@@ -70,3 +70,71 @@ test('PWA polish keeps saved actions visible, refreshable, and fail-safe', () =>
   assert.match(css, /prefers-reduced-motion/);
   assert.match(sw, /icons\/icon-180\.png/);
 });
+
+test('ordinary adjacent topics are never guessed to be a Q&A pair', () => {
+  const parser = read('sm-parser.js');
+  assert.doesNotMatch(parser, /endsWith\('\?'\)/);
+  assert.doesNotMatch(parser, /answerPairId\s*=\s*answer\.id/);
+  assert.match(parser, /Do not infer Q&A relationships from adjacent element IDs/);
+});
+
+test('exports omit PDF wrappers that have no reviewable page text', () => {
+  const localExport = read('export.js');
+  const cloudExport = read('export-cloud.js');
+  assert.match(localExport, /c\.type !== 'pdf-extract' \|\| Boolean\(c\.body\?\.trim\(\)\)/);
+  assert.match(cloudExport, /c\.type !== 'pdf-extract' \|\| Boolean\(c\.body\?\.trim\(\)\)/);
+});
+
+test('Q&A and cloze Items use explicit metadata and never adjacency', () => {
+  const plugin = read('SMAPlugin/SMGoPlugin.cs');
+  const parser = read('sm-parser.js');
+  const app = read('docs/app.js');
+  assert.match(plugin, /data-smgo-answer-b64/);
+  assert.match(plugin, /data-smgo-sentence-b64/);
+  assert.match(parser, /function parseSmgoItem/);
+  assert.match(parser, /type: 'qa'/);
+  assert.match(app, /clozeSentence\.replace\(\/\\\[\(\[\^\\\]\]\+\)\\\]\/g/);
+});
+
+test('explicit Q&A and cloze metadata round-trips Unicode text', () => {
+  const { _test } = require('../sm-parser');
+  const answer = 'Überprüfung: β-blocker';
+  const sentence = 'Die [Liquordrainage] senkt den Hirndruck.';
+  const b64 = value => Buffer.from(value, 'utf8').toString('base64');
+  assert.deepEqual(
+    _test.parseSmgoItem(`<span data-smgo-type="qa" data-smgo-answer-b64="${b64(answer)}">Q?</span>`),
+    { type: 'qa', answer }
+  );
+  assert.deepEqual(
+    _test.parseSmgoItem(`<span data-smgo-type="cloze" data-smgo-sentence-b64="${b64(sentence)}">Q</span>`),
+    { type: 'cloze', sentence }
+  );
+});
+
+test('successful cloud mutations trigger one same-session re-export', () => {
+  const plugin = read('SMAPlugin/SMGoPlugin.cs');
+  assert.match(plugin, /bool collectionChanged = false/);
+  assert.match(plugin, /collectionChanged = true/);
+  assert.match(plugin, /if \(collectionChanged && IsCurrent\(context\)\) RunExportCloud\(\)/);
+});
+
+test('unsupported SMA grade and dismiss calls fail closed', () => {
+  const plugin = read('SMAPlugin/SMGoPlugin.cs');
+  assert.match(plugin, /IsUnavailableInteropMethod/);
+  assert.match(plugin, /left grade pending because this SMA\/SM build cannot verify grading/);
+  assert.match(plugin, /left dismiss pending because this SMA\/SM build cannot dismiss/);
+  assert.doesNotMatch(plugin, /SendKeys\.SendWait/);
+  assert.doesNotMatch(plugin, /RemoveDismissedElementFromQueues/);
+});
+
+test('cloud commands are ordered, durable, and cannot be resurrected', () => {
+  const plugin = read('SMAPlugin/SMGoPlugin.cs');
+  const app = read('docs/app.js');
+  assert.match(plugin, /orderedItems\.Sort/);
+  assert.match(plugin, /case "dismiss": return 3/);
+  assert.match(plugin, /data-smgo-command-b64/);
+  assert.match(plugin, /AlreadyMaterialized\(p, context\)/);
+  assert.match(plugin, /if \(response\.IsSuccessStatusCode\) return true/);
+  assert.match(app, /resolution=ignore-duplicates,return=minimal/);
+  assert.match(app, /applied: false/);
+});

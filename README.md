@@ -51,8 +51,55 @@ The old `GradeApplicator` batch tools are legacy/manual utilities. They do not
 know the active SMA collection and are not a safe replacement for the plugin's
 collection-checked queue processor.
 
+## PWA experience
+
+The header always identifies the active collection and provides an explicit
+queue refresh. A zero-card export is a healthy connected state: the PWA shows
+the collection name and export time instead of treating an empty day as an
+error or completed review session.
+
+Settings are stored only in that browser and can be managed from the Settings
+sheet. The Supabase connection can be tested before saving. Initial cloud,
+static, and LAN queue loads time out instead of leaving the app on an infinite
+spinner.
+
+The **Saved actions** drawer includes extracts, clozes, Q&A items, and notes.
+Each record is marked Pending or Synced. **Remove synced** only removes records
+already delivered; removing an unsynced record requires separate confirmation.
+Offline actions remain collection-scoped in local storage and retry when the
+app comes online or returns to the foreground.
+
+The PWA supports keyboard focus, Escape-to-close, focus containment in dialogs,
+screen-reader status announcements, safe-area insets, and reduced-motion
+preferences. Loading, empty, and error states leave the header accessible so
+Refresh and Settings are always reachable.
+
 ## Validation
 
 Run `npm test` for collection-context regression coverage, and `npm run start`
 with `config.json` configured for a manual LAN server. Build the plugin with
 `SMAPlugin/build.bat` after installing the SuperMemo Assistant dependencies.
+
+For a PWA release, increment the cache name in `docs/sw.js`; installed clients
+otherwise continue using the previous cached shell. The current shell cache is
+`smgo-v51`.
+
+## Current limitations
+
+- Automatic grade application through SMA is not currently reliable because the
+  running remoting service does not implement the advertised `AssignGrade`
+  method. Grade commands remain pending and do not block extracts, Q&A, cloze,
+  dismiss, or priority commands.
+- Automatic dismissal is also unavailable in this SMA/SM18 runtime. Dismiss
+  commands remain pending; SMGo deliberately does not rewrite live SuperMemo
+  queue files or send unverified keystrokes.
+- An outstanding ID with no corresponding SuperMemo element file is omitted
+  rather than exported as an empty card.
+- SuperMemo's `[...]` markers are incremental-reading extraction gaps already
+  present in the source Topic; they are not PWA text truncation.
+
+SMGo-created Q&A and cloze Items carry explicit encoded metadata on their
+question component. Do not infer question/answer relationships from adjacent
+element IDs. After a cloud mutation batch, the plugin performs one consolidated
+re-export so newly created Items and dismissals reach the PWA in the same
+SM/SMA session.

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <!-- After build: copy DLL to SMA package store -->
-  <Target Name="CopyOutput" AfterTargets="Build">
+  <Target Name="CopyOutput" AfterTargets="Build" Condition="'$(SkipDeploy)' != 'true'">
     <Exec Command="copy /y &quot;$(TargetDir)$(AssemblyName).dll&quot; &quot;$(UserProfile)\SuperMemoAssistant\Plugins\Packages\$(AssemblyName).$(Version)\lib\net472\$(AssemblyName).dll&quot;" />
   </Target>
 </Project>

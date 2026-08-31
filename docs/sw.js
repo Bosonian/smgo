@@ -1,4 +1,4 @@
-const CACHE = 'smgo-v50';
+const CACHE = 'smgo-v51';
 const SHELL = ['./', './index.html', './app.js', './style.css', './manifest.json',
                './favicon.ico', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 

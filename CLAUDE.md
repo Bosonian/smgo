@@ -212,15 +212,13 @@ Harrison's Neurology (7.pdf) uses a two-column layout. Both columns share overla
 
 ### Card rendering
 - **pdf-extract**: heading shows `pdfFilename` without extension (e.g. `030-071 Neuroborreliose 2024-05`)
+- **empty PDF wrappers**: omit a PDF wrapper when page-text enrichment returns an empty body; the PWA cannot review it and must not show a misleading empty card
 - **topic / cloze**: no heading — body content displayed directly
-- **Q&A pairs**: topic cards ending with `?` whose `id+1` is a non-question topic are merged; question shown first, "Show Answer" button reveals answer. Both Q and A element IDs graded together.
+- **Q&A safety**: never infer a Q&A pair merely because a topic ends in `?` and the next element is a non-question topic. Incremental-reading extracts are frequently adjacent and unrelated. Native Q&A items must be parsed from their explicit question/answer components.
 - **Priority badge**: shown when Supabase is configured; color-coded `prio-high` (≤20%), `prio-mid` (≤50%), `prio-low` (>50%)
 
-### Q&A pair detection (sm-parser.js)
-Cards are merged in `getTodayCards()` post-processing:
-1. Topic card body ends with `?`
-2. Card at `id+1` exists, is type `topic`, does NOT end with `?`, and has non-empty body
-→ `card.answer = answer.body`, `card.answerPairId = answer.id`, answer card removed from list
+### Q&A parsing (sm-parser.js)
+Adjacent element IDs are not relationship metadata. Parse native Q&A items from their explicit SuperMemo components; until component-aware parsing is available, keep adjacent topics independent rather than risk showing a wrong answer.
 
 ### Q&A rendering and interaction (app.js + style.css)
 - Question shown immediately; "Show Answer" button calls `doReveal()` which unhides `#card-answer`
@@ -258,7 +256,7 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v47` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Cache name: `smgo-v51` — **must bump on every meaningful deploy** or phone will serve stale JS.
 Shell: `['./', './index.html', './app.js', './style.css', './manifest.json', './favicon.ico', './icons/icon-192.png', './icons/icon-512.png']`
 
 ### Manifest
@@ -351,7 +349,7 @@ git push
 
 29. **SM element ID ≠ PDF filename number (usually)** — In SM's Incremental PDF Reader, PDF files are stored in the elements folder as `{elementId}.pdf`. So `7.pdf` corresponds to SM element ID 7. The `getElementId()` function parses the filename integer and uses it as `parentId` for new child extracts — this is correct.
 
-30. **Q&A dismiss must cover both element IDs** — A Q&A pair merges two SM elements (question at `id`, answer at `id+1`). `dismissCard()` must dismiss both `card.id` and `card.answerPairId`. Dismissing only the question card leaves the answer in Outstanding; it surfaces as an orphan topic card on the next review.
+30. **Never infer Q&A from adjacent IDs** — Adjacent outstanding Topics are not relationship metadata. SMGo-created Q&A Items are one native SuperMemo Item with explicit question/answer components. The question component now carries `data-smgo-type="qa"` and a UTF-8 base64 answer so the exporter can reconstruct the card without guessing. `answerPairId` remains only for legacy payload compatibility; new native Items are graded/dismissed by their single element ID.
 
 31. **Q&A adaptive layout via `qa-revealed` class** — On reveal, add class `qa-revealed` to `.card`. Use `flex: 0 0 auto; max-height: 32vh; overflow-y: auto` on the question block and `flex: 1; overflow-y: auto` on the answer block. Without this, the question fills most of the card and the answer is squeezed into a few lines at the bottom.
 
@@ -364,3 +362,50 @@ git push
 35. **Collections are now first-class (2026-08-24)** — Never hard-code a SuperMemo collection path. `SMGoPlugin.OnCollectionSelected()` derives the active root/path ID and passes it to Node exports. `smgo_daily` uses `(collection_id, review_date)` and every `smgo_queue` row/payload has `collection_id` / `collectionId`. The plugin filters and rechecks that ID before applying any command; untagged legacy commands are quarantined under `legacy-facharzt`. Run `supabase-migration-collections.sql` once before using the new schema. Local fallback queues are under `queues/<collection-id>/` and PWA localStorage is collection-scoped.
 
 36. **Collection identity and legacy migration (2026-08-24)** — IDs are `collection-<readable-slug>-<12-char-sha256>` over the NFC-normalized canonical Windows collection path. JS and C# share fixtures; do not supply a custom ID. Queue payloads use `protocolVersion: 2`, `collectionId`, and `commandId` matching the row ID. The plugin snapshots a collection generation before polling or reading a local file, checks again immediately before mutation, and leaves a file unacknowledged if any record fails or mismatches. PWA legacy Facharzt browser data needs an explicit `IMPORT` confirmation; legacy highlight cache needs `--import-legacy-highlight-state` once.
+
+37. **Empty exports are connected states, not completed sessions (2026-08-24)** — A newly created collection may have element files but no `info/Outstanding.sub`; exporting it correctly produces zero cards. The PWA must show the collection-aware empty state (`<collection> is connected`, last export time, Refresh) rather than calling `syncAndDone()` or implying that reviews occurred. Loading/error/empty screens must remain inside the content area, not cover the header, so Settings and Refresh remain reachable.
+
+38. **Saved-action UI must include every persisted queue type (2026-08-24)** — The header badge counts extracts, cloze/Q&A items, and edits/notes, so the drawer, sync totals, and cleanup logic must use those same three stores. Never offer a blanket clear operation that silently deletes unsynced work. The PWA now labels each record Pending/Synced, confirms individual deletion of unsynced records, and only bulk-removes synced records.
+
+39. **PWA network and dialog reliability (2026-08-24)** — Initial Supabase, static JSON, and LAN loads use `fetchWithTimeout()` so a dead endpoint cannot leave an infinite spinner. The Settings UI is a real dialog with validation and a Supabase schema connection test; do not revert it to numbered `prompt()` calls. All dialogs, including priority and settings, participate in Escape handling, focus containment, and focus restoration. Service-worker shell version for this release is `smgo-v50`, including the 180px Apple touch icon.
+
+40. **Neuro100x integration was evaluated and deliberately rejected (2026-08-24)** — Keep SMGo and Neuro100x Personal SRS as separate PWAs, origins, credentials, service workers, offline queues, grading interfaces, and scheduling authorities. SMGo remains the SuperMemo 18 companion; Neuro100x remains an authenticated projection of its Mac-authoritative append-only FSRS journal. Do not map SM grades to FSRS ratings, intermingle review queues, copy cards automatically, or place Neuro100x authentication in the SMGo origin. Acceptable future integration is limited to consistent visual conventions and explicit reciprocal launch links that exchange no credentials, card content, or review state.
+
+41. **Cloud mutation batches re-export once (2026-08-31)** — The startup export occurs before the first Supabase poll. Track whether any collection-scoped queue command applied successfully and run one consolidated `RunExportCloud()` after the batch so new Q&A/cloze/extract Items and dismissals reach the PWA in the same SM/SMA session.
+
+42. **PWA card completeness audit and source repair (2026-08-31)** — Reconciled every Endgame outstanding ID against its element file, parser output, and cloud row. Elements 9–15 contained sentence fragments in SuperMemo itself; their complete sentences were recovered verbatim from Bradley's PDF and the originals were backed up under `%TEMP%\smgo-endgame-card-repair-2026-08-31`. Do not interpret SuperMemo's `[...]` incremental-reading extraction markers as PWA truncation. Outstanding element 39 has no corresponding element file and is deliberately omitted rather than fabricated.
+
+43. **Explicit Q&A/cloze round-trip metadata (2026-08-31)** — `ApplyOneQA` writes `data-smgo-answer-b64`; `ApplyOneCloze` writes `data-smgo-sentence-b64`. `sm-parser.js` decodes those markers, supports Unicode, and emits native `qa`/`cloze` cards. Cloze rendering hides the actual bracketed answer text and reveals it on demand. Never restore the old `topic ends with ? + id+1` heuristic.
+
+44. **Empty PDF wrappers are not review cards (2026-08-31)** — PDF wrapper elements whose page-text enrichment produces an empty body are excluded by both local and cloud exports. This prevents `No renderable content` cards while retaining PDF cards that successfully produce page text.
+
+45. **SMA grade API incompatibility remains open (2026-08-31)** — The Interop interface exposes `IElementWdw.AssignGrade`, but the running SMA remoting service reports `method AssignGrade not found`. Grade commands remain pending safely and do not block later queue commands. A tightly scoped UI applicator was used for recovery, but automatic plugin grading still needs a supported runtime call or guarded fallback.
+
+46. **Cloud creation is idempotent across crashes (2026-08-31)** — Every cloud-created extract, Q&A, cloze, image, PDF extract, and edit carries a hidden `data-smgo-command-b64` marker. Before replaying a create command, the plugin searches the active collection for that marker. Failed acknowledgements remain retryable without duplicate creation.
+
+47. **Queue rows are immutable commands (2026-08-31)** — The PWA inserts rows with `applied:false` and `resolution=ignore-duplicates`; it must never merge over an existing command because that could reset an applied row. Desktop processing orders creates first and dismissals last, with command ID as the deterministic tie-breaker.
+
+48. **Unsupported mutations fail closed (2026-08-31)** — Do not use `SendKeys` as an automatic grade fallback and do not rewrite `Outstanding.sub`/`priority.sub` while SuperMemo is running as a dismiss fallback. Those commands stay pending until a collection-checked, verifiable mechanism exists. The manual exporter generates data only; publishing is an explicit Git operation.
+
+## Endgame operational status (2026-08-31)
+
+- Active collection ID: `collection-endgame-1d821730858a`.
+- The 2026-08-31 hardened Release plugin is installed in SMA's package store and hash-matched to the build output (`25BF564F…DC65`). It becomes active on the next SM/SMA launch.
+- Pending cloud batch inspected before launch: five Q&A commands with five matching dismissals, plus one unrelated grade for element 15.
+- Create commands are processed before dismissals so dependent Q&A/cloze children exist first. Unsupported dismissals remain pending instead of editing live collection files.
+- After opening SMA and Endgame, allow 30–60 seconds for the first poll and same-session re-export before refreshing the PWA.
+- Regression suite after this session: 18 tests passing; plugin compiles with zero C# warnings before deployment copy.
+
+## Current local collection onboarding (2026-08-24)
+
+- `C:\SuperMemo\systems\Endgame` was created and opened successfully.
+- Its deterministic ID is `collection-endgame-1d821730858a`.
+- The collection-aware Supabase migration was run and verified by selecting
+  `collection_id` and `review_date` from `smgo_daily`.
+- The Release SMA plugin DLL was built, installed, and hash-verified against the
+  build output.
+- `config.json` points manual Node commands at Endgame; it remains gitignored
+  because it contains Supabase credentials.
+- The first cloud export returned HTTP 201 and was verified in `smgo_daily` for
+  2026-08-24 with zero cards. This is expected until Endgame has an
+  `info/Outstanding.sub` daily queue.
