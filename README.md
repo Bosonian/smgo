@@ -80,6 +80,12 @@ screen-reader status announcements, safe-area insets, and reduced-motion
 preferences. Loading, empty, and error states leave the header accessible so
 Refresh and Settings are always reachable.
 
+SMGo warns ten minutes before local midnight and during the first thirty minutes
+of a new day. Sync saved actions, stop the current review session, then open SMA
+and the active SuperMemo collection on the desktop. After waiting 30–60 seconds
+for a fresh export, return to the PWA and refresh the queue. A session left open
+across midnight receives the post-midnight warning when it becomes visible again.
+
 ## Validation
 
 Run `npm test` for collection-context regression coverage, and `npm run start`
@@ -88,7 +94,7 @@ with `config.json` configured for a manual LAN server. Build the plugin with
 
 For a PWA release, increment the cache name in `docs/sw.js`; installed clients
 otherwise continue using the previous cached shell. The current shell cache is
-`smgo-v53`.
+`smgo-v54`.
 
 ## Current limitations
 

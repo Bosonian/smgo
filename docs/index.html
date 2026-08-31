@@ -177,6 +177,25 @@
     </div>
   </div>
 
+  <!-- Midnight rollover safety alert -->
+  <div id="midnight-modal" class="modal" role="alertdialog" aria-modal="true" aria-labelledby="midnight-modal-title" aria-describedby="midnight-modal-message">
+    <div class="modal-content midnight-modal-content">
+      <div class="modal-header">
+        <span id="midnight-modal-title">Midnight safety check</span>
+        <button id="midnight-modal-close" aria-label="Close midnight safety alert">✕</button>
+      </div>
+      <div class="midnight-message">
+        <div class="midnight-icon" aria-hidden="true">🌙</div>
+        <p id="midnight-modal-message"></p>
+        <p id="midnight-modal-steps"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="midnight-dismiss-btn" class="secondary-btn">I understand</button>
+        <button id="midnight-sync-btn" class="primary-btn">Sync saved actions</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Priority modal -->
   <div id="priority-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="priority-modal-title">
     <div class="modal-content">

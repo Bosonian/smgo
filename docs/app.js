@@ -1712,6 +1712,64 @@ $('qa-modal-close').addEventListener('click',  () => closeModal('qa-modal'));
 $('qa-cancel-btn').addEventListener('click',   () => closeModal('qa-modal'));
 $('qa-save-btn').addEventListener('click',     saveQA);
 
+// Midnight rollover safety. SuperMemo's repetition day and SMGo's cloud/local
+// date must roll together, so warn before midnight and again after a crossed
+// date until the user can produce a fresh desktop export.
+const midnightSessionDate = localDate();
+let midnightTimer = null;
+
+function getMidnightAlertPhase(now = new Date(), sessionDate = midnightSessionDate) {
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (today !== sessionDate) return { key: `post-${sessionDate}-${today}`, post: true };
+  if (minutes >= 23 * 60 + 50) return { key: `pre-${today}`, post: false };
+  if (minutes <= 30) return { key: `post-${today}`, post: true };
+  return null;
+}
+
+function checkMidnightAlert(now = new Date()) {
+  const phase = getMidnightAlertPhase(now);
+  if (!phase || localStorage.getItem('smgo_midnight_alert_phase') === phase.key) return;
+  // Never stack over an editor or settings dialog. The 30-second timer (or
+  // visibility restoration) will retry as soon as the active dialog closes.
+  if (document.querySelector('.modal.open:not(#midnight-modal)')) return;
+  localStorage.setItem('smgo_midnight_alert_phase', phase.key);
+
+  if (phase.post) {
+    $('midnight-modal-title').textContent = 'A new review day has started';
+    $('midnight-modal-message').textContent = 'Stop this review session until SMGo has a fresh SuperMemo export for the new day.';
+    $('midnight-modal-steps').textContent = `On the desktop, open SMA and ${activeCollection?.name || 'the active collection'}, wait 30–60 seconds for export, then return here and tap Refresh queue.`;
+  } else {
+    $('midnight-modal-title').textContent = 'Midnight is approaching';
+    $('midnight-modal-message').textContent = 'Finish the current card and sync your saved actions before midnight. Do not continue the same review session across the date change.';
+    $('midnight-modal-steps').textContent = `After midnight, open SMA and ${activeCollection?.name || 'the active collection'} on the desktop, wait 30–60 seconds, then refresh the PWA for the new review day.`;
+  }
+  if (!$('midnight-modal').classList.contains('open')) openModal('midnight-modal', 'midnight-sync-btn');
+}
+
+async function syncBeforeMidnight() {
+  const button = $('midnight-sync-btn');
+  button.disabled = true;
+  button.textContent = 'Syncing…';
+  try {
+    await syncAllPending();
+    await syncAllExtracts();
+    await syncAllDismissed();
+    const pending = pendingActionCount();
+    showFlash(pending ? `${pending} saved action${pending === 1 ? '' : 's'} still pending` : '✓ Sync attempt finished');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Sync saved actions';
+    closeModal('midnight-modal');
+  }
+}
+
+$('midnight-modal-close').addEventListener('click', () => closeModal('midnight-modal'));
+$('midnight-dismiss-btn').addEventListener('click', () => closeModal('midnight-modal'));
+$('midnight-sync-btn').addEventListener('click', syncBeforeMidnight);
+setTimeout(checkMidnightAlert, 500);
+midnightTimer = setInterval(checkMidnightAlert, 30_000);
+
 // Drawer
 extractBadgeBtn.addEventListener('click', openExtractDrawer);
 $('extract-drawer-close').addEventListener('click', closeExtractDrawer);
@@ -2002,6 +2060,7 @@ function _stopPolling() { clearInterval(_pollTimer); _pollTimer = null; }
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    checkMidnightAlert();
     _pollTick();      // sync immediately on restore from background
     _startPolling();  // then resume the interval
   } else {

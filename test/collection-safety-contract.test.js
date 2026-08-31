@@ -112,7 +112,7 @@ test('whole-card Q&A generation creates an editable collection-scoped batch', ()
   assert.match(app, /cards\[idx\]\?\.id === request\.context\.parentId/);
   assert.match(app, /qaAbortController\?\.abort\(\)/);
   assert.match(app, /approveWholeCardUpload/);
-  assert.match(sw, /smgo-v53/);
+  assert.match(sw, /smgo-v54/);
 });
 
 test('whole-card Gemini output is parsed and must contain multiple usable cards', () => {
@@ -133,6 +133,26 @@ test('whole-card Gemini output is parsed and must contain multiple usable cards'
   assert.equal(context.extract('{"cards":[{"question":"Same?","answer":"A1"},{"question":"same?","answer":"A2"}]}'), null);
   assert.throws(() => context.requireMany([{ question: 'Only?', answer: 'One' }]), /fewer than two/);
   assert.throws(() => context.requireMany(null), /fewer than two/);
+});
+
+test('midnight safety alert covers pre-midnight, post-midnight, and crossed sessions', () => {
+  const app = read('docs/app.js');
+  const html = read('docs/index.html');
+  const sw = read('docs/sw.js');
+  const start = app.indexOf('function getMidnightAlertPhase');
+  const end = app.indexOf('function checkMidnightAlert', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {};
+  vm.runInNewContext(`${app.slice(start, end)}; this.phase = getMidnightAlertPhase;`, context);
+  const session = '2026-09-01';
+  const phase = value => JSON.parse(JSON.stringify(context.phase(value, session)));
+  assert.deepEqual(phase(new Date(2026, 8, 1, 23, 50)), { key: 'pre-2026-09-01', post: false });
+  assert.deepEqual(phase(new Date(2026, 8, 2, 0, 10)), { key: 'post-2026-09-01-2026-09-02', post: true });
+  assert.equal(phase(new Date(2026, 8, 1, 12, 0)), null);
+  assert.match(app, /visibilitychange[\s\S]*checkMidnightAlert\(\)/);
+  assert.match(app, /await syncAllPending\(\)[\s\S]*await syncAllExtracts\(\)[\s\S]*await syncAllDismissed\(\)/);
+  assert.match(html, /id="midnight-modal"[^>]+role="alertdialog"/);
+  assert.match(sw, /smgo-v54/);
 });
 
 test('explicit Q&A and cloze metadata round-trips Unicode text', () => {
