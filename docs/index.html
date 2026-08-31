@@ -112,6 +112,7 @@
     <div id="grade-row"></div>
     <div id="card-meta-row">
       <button id="skip-btn" class="secondary-btn">Skip →</button>
+      <button id="whole-qa-btn" class="secondary-btn whole-qa-btn" style="display:none" title="Generate several Q&amp;A cards from the complete card">🤖 Card → Q&amp;A</button>
       <button id="edit-btn" class="secondary-btn" style="display:none">✏ Note</button>
       <button id="priority-btn" class="secondary-btn" style="display:none" title="Set priority in SM">P: –</button>
       <button id="dismiss-btn" class="secondary-btn dismiss-btn" style="display:none">Dismiss</button>
@@ -167,12 +168,8 @@
         <div class="spinner" style="margin:24px auto"></div>
         <p style="text-align:center;color:var(--muted);font-size:.85rem">Generating with Gemini…</p>
       </div>
-      <div id="qa-form" style="display:none">
-        <label class="qa-label">Question</label>
-        <textarea id="qa-question" class="qa-textarea" rows="3"></textarea>
-        <label class="qa-label">Answer</label>
-        <textarea id="qa-answer" class="qa-textarea" rows="3"></textarea>
-      </div>
+      <p id="qa-hint" class="modal-hint" style="display:none"></p>
+      <div id="qa-form" style="display:none"></div>
       <div class="modal-footer">
         <button id="qa-cancel-btn" class="secondary-btn">Cancel</button>
         <button id="qa-save-btn" class="primary-btn">Save Q&amp;A</button>

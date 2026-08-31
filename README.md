@@ -69,6 +69,12 @@ already delivered; removing an unsynced record requires separate confirmation.
 Offline actions remain collection-scoped in local storage and retry when the
 app comes online or returns to the foreground.
 
+Use **Card → Q&A** to generate several independent Q&A cards from the complete
+text of the current card without selecting a passage. Gemini proposes a small
+batch based on the source length; review and edit every pair, remove weak or
+redundant suggestions, then save the accepted batch. The existing selection
+toolbar still creates one focused Q&A from selected text.
+
 The PWA supports keyboard focus, Escape-to-close, focus containment in dialogs,
 screen-reader status announcements, safe-area insets, and reduced-motion
 preferences. Loading, empty, and error states leave the header accessible so
@@ -82,7 +88,7 @@ with `config.json` configured for a manual LAN server. Build the plugin with
 
 For a PWA release, increment the cache name in `docs/sw.js`; installed clients
 otherwise continue using the previous cached shell. The current shell cache is
-`smgo-v51`.
+`smgo-v52`.
 
 ## Current limitations
 

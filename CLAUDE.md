@@ -256,7 +256,7 @@ SM stores each PDF visual line as a separate `<p>`, producing `\r\n\n` between e
 `normalizeBody()` in `app.js` rejoins soft-wrapped lines (heuristic: no sentence-ending punct + next block starts lowercase/digit). `formatBody()` wraps paragraphs in `<p>` tags.
 
 ### Service worker
-Cache name: `smgo-v51` — **must bump on every meaningful deploy** or phone will serve stale JS.
+Cache name: `smgo-v52` — **must bump on every meaningful deploy** or phone will serve stale JS.
 Shell: `['./', './index.html', './app.js', './style.css', './manifest.json', './favicon.ico', './icons/icon-192.png', './icons/icon-512.png']`
 
 ### Manifest
@@ -367,7 +367,7 @@ git push
 
 38. **Saved-action UI must include every persisted queue type (2026-08-24)** — The header badge counts extracts, cloze/Q&A items, and edits/notes, so the drawer, sync totals, and cleanup logic must use those same three stores. Never offer a blanket clear operation that silently deletes unsynced work. The PWA now labels each record Pending/Synced, confirms individual deletion of unsynced records, and only bulk-removes synced records.
 
-39. **PWA network and dialog reliability (2026-08-24)** — Initial Supabase, static JSON, and LAN loads use `fetchWithTimeout()` so a dead endpoint cannot leave an infinite spinner. The Settings UI is a real dialog with validation and a Supabase schema connection test; do not revert it to numbered `prompt()` calls. All dialogs, including priority and settings, participate in Escape handling, focus containment, and focus restoration. Service-worker shell version is currently `smgo-v51`, including the 180px Apple touch icon.
+39. **PWA network and dialog reliability (2026-08-24)** — Initial Supabase, static JSON, LAN, and Gemini requests use bounded fetch timeouts so a dead endpoint cannot leave an infinite spinner. The Settings UI is a real dialog with validation and a Supabase schema connection test; do not revert it to numbered `prompt()` calls. All dialogs, including priority and settings, participate in Escape handling, focus containment, and focus restoration. Service-worker shell version is currently `smgo-v52`, including the 180px Apple touch icon.
 
 40. **Neuro100x integration was evaluated and deliberately rejected (2026-08-24)** — Keep SMGo and Neuro100x Personal SRS as separate PWAs, origins, credentials, service workers, offline queues, grading interfaces, and scheduling authorities. SMGo remains the SuperMemo 18 companion; Neuro100x remains an authenticated projection of its Mac-authoritative append-only FSRS journal. Do not map SM grades to FSRS ratings, intermingle review queues, copy cards automatically, or place Neuro100x authentication in the SMGo origin. Acceptable future integration is limited to consistent visual conventions and explicit reciprocal launch links that exchange no credentials, card content, or review state.
 
@@ -395,7 +395,9 @@ git push
 
 52. **Repeated PWA dismissal is expected while dismissal is unsupported (2026-09-01)** — Cards dismissed in the PWA can reappear after the next export because the corresponding SuperMemo elements remain outstanding. Dismissing them again records another client intent but does not make the SuperMemo dismissal durable. Treat repeated dismiss rows as unresolved commands, not new cards and not proof of corruption. Do not keep retrying automatically or mark them applied until a verified bridge exists.
 
-53. **Current stable boundary after rollback (2026-09-01)** — Repository behavior remains the hardened fail-closed design at/after `d845c8e`: export, rendering, Q&A/cloze/extract creation, explicit metadata, idempotency, collection isolation, and priority handling remain supported; automatic grade and dismiss remain pending. The regression suite has 18 passing tests and the Release plugin builds with zero warnings/errors.
+53. **Current stable boundary after rollback (2026-09-01)** — Repository behavior remains the hardened fail-closed design at/after `d845c8e`: export, rendering, Q&A/cloze/extract creation, explicit metadata, idempotency, collection isolation, and priority handling remain supported; automatic grade and dismiss remain pending. The regression suite has 19 passing tests and the Release plugin builds with zero warnings/errors.
+
+54. **Whole-card Q&A generation (2026-09-01)** — The persistent `Card → Q&A` action sends the complete readable card content (title/body/answer/cloze source, deduplicated) to Gemini and requests 2–8 independent, non-overlapping cards according to source length. Generated pairs are editable and individually removable before one collection-scoped batch is saved. The selection toolbar remains available for generating one focused Q&A. Both paths use the same pending-items/upload pipeline; service-worker shell version is `smgo-v52`.
 
 ## Endgame operational status (2026-09-01)
 
@@ -404,7 +406,7 @@ git push
 - The Q&A creation commands were previously processed. Known unresolved mutations included dismissals and one grade for element 15; the user dismissed redisplayed cards again on 2026-09-01, so exact pending-row counts must be queried from Supabase before any future remediation.
 - Creates are processed before dismissals. Unsupported dismissals and grades remain pending instead of editing live collection files or driving unverified UI actions.
 - After opening SMA and Endgame, allow 30–60 seconds for the first poll and same-session re-export before refreshing the PWA. Redisplayed dismissed cards currently indicate the known unsupported dismissal path.
-- Regression suite after this session: 18 tests passing; plugin compiles with zero C# warnings/errors and the installed DLL hash matches the build.
+- Regression suite after this session: 19 tests passing; plugin compiles with zero C# warnings/errors and the installed DLL hash matches the build.
 
 ## Current local collection onboarding (2026-08-24)
 

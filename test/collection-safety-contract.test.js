@@ -96,6 +96,20 @@ test('Q&A and cloze Items use explicit metadata and never adjacency', () => {
   assert.match(app, /clozeSentence\.replace\(\/\\\[\(\[\^\\\]\]\+\)\\\]\/g/);
 });
 
+test('whole-card Q&A generation creates an editable collection-scoped batch', () => {
+  const app = read('docs/app.js');
+  const html = read('docs/index.html');
+  const sw = read('docs/sw.js');
+  assert.match(html, /id="whole-qa-btn"/);
+  assert.match(app, /function cardTextForQA\(card\)/);
+  assert.match(app, /async function captureWholeCardForQA\(\)/);
+  assert.match(app, /async function callGeminiMany\(text, apiKey\)/);
+  assert.match(app, /pendingItems\.push\(\.\.\.items\)/);
+  assert.match(app, /collectionPayload\(\{/);
+  assert.match(app, /data-qa-remove/);
+  assert.match(sw, /smgo-v52/);
+});
+
 test('explicit Q&A and cloze metadata round-trips Unicode text', () => {
   const { _test } = require('../sm-parser');
   const answer = 'Überprüfung: β-blocker';
