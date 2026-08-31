@@ -88,7 +88,7 @@ with `config.json` configured for a manual LAN server. Build the plugin with
 
 For a PWA release, increment the cache name in `docs/sw.js`; installed clients
 otherwise continue using the previous cached shell. The current shell cache is
-`smgo-v52`.
+`smgo-v53`.
 
 ## Current limitations
 

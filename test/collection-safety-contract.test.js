@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const { collectionIdForPath, createCollectionContext } = require('../collection-context');
 
 const root = path.join(__dirname, '..');
@@ -103,11 +104,35 @@ test('whole-card Q&A generation creates an editable collection-scoped batch', ()
   assert.match(html, /id="whole-qa-btn"/);
   assert.match(app, /function cardTextForQA\(card\)/);
   assert.match(app, /async function captureWholeCardForQA\(\)/);
-  assert.match(app, /async function callGeminiMany\(text, apiKey\)/);
+  assert.match(app, /async function callGeminiMany\(text, apiKey, signal\)/);
   assert.match(app, /pendingItems\.push\(\.\.\.items\)/);
   assert.match(app, /collectionPayload\(\{/);
   assert.match(app, /data-qa-remove/);
-  assert.match(sw, /smgo-v52/);
+  assert.match(app, /Object\.freeze\(\{ \.\.\.context \}\)/);
+  assert.match(app, /cards\[idx\]\?\.id === request\.context\.parentId/);
+  assert.match(app, /qaAbortController\?\.abort\(\)/);
+  assert.match(app, /approveWholeCardUpload/);
+  assert.match(sw, /smgo-v53/);
+});
+
+test('whole-card Gemini output is parsed and must contain multiple usable cards', () => {
+  const app = read('docs/app.js');
+  const start = app.indexOf('function extractGeminiCards(raw)');
+  const end = app.indexOf('function geminiAttemptTimeout', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {};
+  vm.runInNewContext(`${app.slice(start, end)}; this.extract = extractGeminiCards; this.requireMany = requireMultipleQADrafts;`, context);
+
+  const parsed = context.extract('```json\n{"cards":[{"question":"Q1?","answer":"A1"},{"question":"Q2?","answer":"A2"}]}\n```');
+  assert.deepEqual(JSON.parse(JSON.stringify(parsed)), [
+    { question: 'Q1?', answer: 'A1' },
+    { question: 'Q2?', answer: 'A2' },
+  ]);
+  assert.equal(context.requireMany(parsed).length, 2);
+  assert.equal(context.extract('{"cards":[{"question":"Q1?","answer":"A1"},{"bad":true}]}'), null);
+  assert.equal(context.extract('{"cards":[{"question":"Same?","answer":"A1"},{"question":"same?","answer":"A2"}]}'), null);
+  assert.throws(() => context.requireMany([{ question: 'Only?', answer: 'One' }]), /fewer than two/);
+  assert.throws(() => context.requireMany(null), /fewer than two/);
 });
 
 test('explicit Q&A and cloze metadata round-trips Unicode text', () => {
